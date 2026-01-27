@@ -220,11 +220,7 @@ fn main() {
             }
             let line = &history[idx];
             mv(y, 1);
-            if line.starts_with("Result:") {
-                attron(COLOR_PAIR(1));
-                addstr(line);
-                attroff(COLOR_PAIR(1));
-            } else if line.starts_with("Error:") {
+            if line.starts_with("Error:") {
                 attron(COLOR_PAIR(2));
                 addstr(line);
                 attroff(COLOR_PAIR(2));
@@ -236,9 +232,9 @@ fn main() {
                 addstr(&line[3..]);
                 attroff(COLOR_PAIR(4));
             } else {
-                attron(COLOR_PAIR(4));
+                attron(COLOR_PAIR(1));
                 addstr(line);
-                attroff(COLOR_PAIR(4));
+                attroff(COLOR_PAIR(1));
             }
         }
 
@@ -360,7 +356,7 @@ fn main() {
                                 variables.insert(name, res);
                             }
                             history.push(format!(">> {}", input));
-                            history.push(format!("Result: {}", res));
+                            history.push(format!("{}", res));
                         }
                         Err(e) => {
                             history.push(format!(">> {}", input));

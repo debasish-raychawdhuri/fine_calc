@@ -1,6 +1,7 @@
 use ncurses::*;
+use std::collections::HashMap;
 
-fn evaluate_expression(expr: &str) -> Result<f64, String> {
+fn evaluate_expression(expr: &str, vars: &HashMap<String, f64>) -> Result<f64, String> {
     let expr = expr.trim();
     if expr.is_empty() {
         return Err("Empty expression".to_string());
@@ -28,9 +29,9 @@ fn evaluate_expression(expr: &str) -> Result<f64, String> {
             continue;
         }
 
-        if c.is_alphabetic() {
+        if c.is_alphabetic() || c == '_' {
             let mut func_name = String::new();
-            while i < chars.len() && chars[i].is_alphabetic() {
+            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
                 func_name.push(chars[i]);
                 i += 1;
             }
@@ -50,7 +51,7 @@ fn evaluate_expression(expr: &str) -> Result<f64, String> {
                     }
                     i += 1;
                 }
-                let arg = evaluate_expression(&paren_expr)?;
+                let arg = evaluate_expression(&paren_expr, vars)?;
                 num = match func_name.as_str() {
                     "sin" => arg.sin(),
                     "cos" => arg.cos(),
@@ -71,7 +72,13 @@ fn evaluate_expression(expr: &str) -> Result<f64, String> {
                 num = match func_name.as_str() {
                     "pi" => std::f64::consts::PI,
                     "e" => std::f64::consts::E,
-                    _ => return Err(format!("Unknown identifier: {}", func_name)),
+                    _ => {
+                        if let Some(&val) = vars.get(&func_name) {
+                            val
+                        } else {
+                            return Err(format!("Unknown identifier: {}", func_name));
+                        }
+                    }
                 };
                 continue;
             }
@@ -92,7 +99,7 @@ fn evaluate_expression(expr: &str) -> Result<f64, String> {
                 }
                 i += 1;
             }
-            num = evaluate_expression(&paren_expr)?;
+            num = evaluate_expression(&paren_expr, vars)?;
             continue;
         }
 
@@ -164,6 +171,7 @@ fn main() {
     let mut input_history: Vec<String> = Vec::new();
     let mut hist_idx: usize = 0;
     let mut saved_input = String::new();
+    let mut variables: HashMap<String, f64> = HashMap::new();
 
     loop {
         let max_y = getmaxy(stdscr()) as usize;
@@ -334,9 +342,23 @@ fn main() {
             }
             KEY_ENTER | 10 => {
                 if !input.trim().is_empty() {
-                    let result = evaluate_expression(&input);
+                    let trimmed = input.trim();
+                    let (var_name, expr_str) = if let Some(eq_pos) = trimmed.find('=') {
+                        let lhs = trimmed[..eq_pos].trim();
+                        if !lhs.is_empty() && lhs.chars().all(|c| c.is_alphanumeric() || c == '_') && (lhs.starts_with('_') || lhs.chars().next().unwrap().is_alphabetic()) {
+                            (Some(lhs.to_string()), trimmed[eq_pos + 1..].trim())
+                        } else {
+                            (None, trimmed)
+                        }
+                    } else {
+                        (None, trimmed)
+                    };
+                    let result = evaluate_expression(expr_str, &variables);
                     match result {
                         Ok(res) => {
+                            if let Some(name) = var_name {
+                                variables.insert(name, res);
+                            }
                             history.push(format!(">> {}", input));
                             history.push(format!("Result: {}", res));
                         }

@@ -381,3 +381,115 @@ fn main() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn eval(expr: &str) -> Result<f64, String> {
+        evaluate_expression(expr, &HashMap::new())
+    }
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn basic_arithmetic() {
+        assert!(approx(eval("2+3").unwrap(), 5.0));
+        assert!(approx(eval("10-4").unwrap(), 6.0));
+        assert!(approx(eval("3*5").unwrap(), 15.0));
+        assert!(approx(eval("8/2").unwrap(), 4.0));
+    }
+
+    #[test]
+    fn exponentiation() {
+        assert!(approx(eval("2^10").unwrap(), 1024.0));
+    }
+
+    #[test]
+    fn negative_result() {
+        assert!(approx(eval("3-5").unwrap(), -2.0));
+    }
+
+    #[test]
+    fn decimal_numbers() {
+        assert!(approx(eval("1.5+2.5").unwrap(), 4.0));
+        assert!(approx(eval("0.1*10").unwrap(), 1.0));
+    }
+
+    #[test]
+    fn constants() {
+        assert!(approx(eval("pi").unwrap(), std::f64::consts::PI));
+        assert!(approx(eval("e").unwrap(), std::f64::consts::E));
+    }
+
+    #[test]
+    fn trig_functions() {
+        assert!(approx(eval("sin(0)").unwrap(), 0.0));
+        assert!(approx(eval("cos(0)").unwrap(), 1.0));
+        assert!(approx(eval("tan(0)").unwrap(), 0.0));
+        assert!(approx(eval("asin(1)").unwrap(), std::f64::consts::FRAC_PI_2));
+        assert!(approx(eval("acos(1)").unwrap(), 0.0));
+        assert!(approx(eval("atan(1)").unwrap(), std::f64::consts::FRAC_PI_4));
+    }
+
+    #[test]
+    fn hyperbolic_functions() {
+        assert!(approx(eval("sinh(0)").unwrap(), 0.0));
+        assert!(approx(eval("cosh(0)").unwrap(), 1.0));
+        assert!(approx(eval("tanh(0)").unwrap(), 0.0));
+        assert!(approx(eval("asinh(0)").unwrap(), 0.0));
+        assert!(approx(eval("acosh(1)").unwrap(), 0.0));
+        assert!(approx(eval("atanh(0)").unwrap(), 0.0));
+    }
+
+    #[test]
+    fn parentheses() {
+        assert!(approx(eval("(2+3)*4").unwrap(), 20.0));
+        assert!(approx(eval("((1+2)*(3+4))").unwrap(), 21.0));
+    }
+
+    #[test]
+    fn nested_functions() {
+        assert!(approx(eval("sin(pi/2)").unwrap(), 1.0));
+        assert!(approx(eval("cos(2*pi)").unwrap(), 1.0));
+    }
+
+    #[test]
+    fn variables() {
+        let mut vars = HashMap::new();
+        vars.insert("x".to_string(), 10.0);
+        vars.insert("y".to_string(), 3.0);
+        assert!(approx(evaluate_expression("x+y", &vars).unwrap(), 13.0));
+        assert!(approx(evaluate_expression("x*y", &vars).unwrap(), 30.0));
+    }
+
+    #[test]
+    fn complex_expressions() {
+        assert!(approx(eval("2^3+sin(pi/2)*4-1").unwrap(), 11.0));
+        assert!(approx(eval("(2+3)*(4-1)/3").unwrap(), 5.0));
+    }
+
+    #[test]
+    fn error_empty() {
+        assert!(eval("").is_err());
+    }
+
+    #[test]
+    fn error_unknown_function() {
+        assert!(eval("foo(1)").is_err());
+    }
+
+    #[test]
+    fn error_unknown_identifier() {
+        assert!(eval("xyz").is_err());
+    }
+
+    #[test]
+    fn operator_precedence() {
+        // Stack-based eval: 2+3*4 => push 2, then 3*4=12, sum=14
+        assert!(approx(eval("2+3*4").unwrap(), 14.0));
+    }
+}

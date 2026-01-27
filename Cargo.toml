@@ -1,0 +1,7 @@
+[package]
+name = "fine_calc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ncurses = "5.101.0"

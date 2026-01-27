@@ -39,10 +39,20 @@ sudo dnf install ncurses-devel
 cargo build --release
 ```
 
+## Installing
+
+```sh
+cargo install --path .
+```
+
+This installs `fine_calc` to your Cargo bin directory (usually `~/.cargo/bin`).
+
 ## Running
 
 ```sh
 cargo run --release
+# or, if installed:
+fine_calc
 ```
 
 ## Examples

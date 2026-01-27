@@ -61,6 +61,9 @@ fn evaluate_expression(expr: &str) -> Result<f64, String> {
                     "sinh" => arg.sinh(),
                     "cosh" => arg.cosh(),
                     "tanh" => arg.tanh(),
+                    "asinh" => arg.asinh(),
+                    "acosh" => arg.acosh(),
+                    "atanh" => arg.atanh(),
                     _ => return Err(format!("Unknown function: {}", func_name)),
                 };
                 continue;

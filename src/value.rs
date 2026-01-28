@@ -4,6 +4,7 @@ use std::fmt;
 pub enum Value {
     Scalar(f64),
     Array(Vec<f64>),
+    Lambda { param: String, body: String },
 }
 
 impl fmt::Display for Value {
@@ -20,6 +21,7 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::Lambda { param, body } => write!(f, "(|{}| {})", param, body),
         }
     }
 }
@@ -28,7 +30,7 @@ impl Value {
     pub fn as_scalar(&self) -> Option<f64> {
         match self {
             Value::Scalar(v) => Some(*v),
-            _ => None,
+            Value::Array(_) | Value::Lambda { .. } => None,
         }
     }
 
@@ -53,6 +55,7 @@ impl Value {
                         .collect(),
                 )
             }
+            _ => panic!("Cannot perform arithmetic on lambda values"),
         }
     }
 
@@ -80,6 +83,7 @@ impl Value {
         match self {
             Value::Scalar(v) => Value::Scalar(f(v)),
             Value::Array(elems) => Value::Array(elems.iter().map(|&x| f(x)).collect()),
+            Value::Lambda { .. } => panic!("Cannot apply numeric function to lambda"),
         }
     }
 
@@ -132,7 +136,7 @@ impl Value {
                 }
                 Ok(Value::Array((0..n).map(|i| i as f64).collect()))
             }
-            _ => Err("Range requires a scalar argument"),
+            Value::Array(_) | Value::Lambda { .. } => Err("Range requires a scalar argument"),
         }
     }
 }

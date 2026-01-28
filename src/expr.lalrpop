@@ -98,9 +98,19 @@ Atom: Value = {
             "floor" => Ok(arg.apply_fn(f64::floor)),
             "ceil" => Ok(arg.apply_fn(f64::ceil)),
             "round" => Ok(arg.apply_fn(f64::round)),
-            _ => Err(lalrpop_util::ParseError::User {
-                error: "Unknown function",
-            }),
+            _ => {
+                if let Some(Value::Lambda { param, body }) = vars.get(name) {
+                    let mut inner = vars.clone();
+                    inner.insert(param.clone(), arg);
+                    crate::expr::TopExprParser::new()
+                        .parse(&inner, body)
+                        .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })
+                } else {
+                    Err(lalrpop_util::ParseError::User {
+                        error: "Unknown function",
+                    })
+                }
+            },
         }
     },
     <name:Ident> =>? {

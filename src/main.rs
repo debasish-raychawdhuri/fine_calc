@@ -11,6 +11,24 @@ fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Val
     if input.is_empty() {
         return Err("Empty expression".to_string());
     }
+    // Detect lambda literal: (|param| body)
+    if input.starts_with("(|") && input.ends_with(')') {
+        let inner = &input[2..input.len() - 1]; // strip "(" and ")"
+        if let Some(pipe_pos) = inner.find('|') {
+            let param = inner[..pipe_pos].trim();
+            let body = inner[pipe_pos + 1..].trim();
+            if !param.is_empty()
+                && param.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && (param.starts_with('_') || param.chars().next().unwrap().is_alphabetic())
+                && !body.is_empty()
+            {
+                return Ok(Value::Lambda {
+                    param: param.to_string(),
+                    body: body.to_string(),
+                });
+            }
+        }
+    }
     expr::TopExprParser::new()
         .parse(vars, input)
         .map_err(|e| match e {
@@ -482,6 +500,31 @@ mod tests {
     fn comparison_array_broadcast() {
         let v = eval("{1,2,-1}>0").unwrap();
         assert!(approx_arr(&array(&v), &[1.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn lambda_define_and_call() {
+        let mut vars = HashMap::new();
+        let lam = Value::Lambda { param: "x".to_string(), body: "x*x".to_string() };
+        vars.insert("sq".to_string(), lam);
+        assert!(approx(scalar(&evaluate_expression("sq(3)", &vars).unwrap()), 9.0));
+    }
+
+    #[test]
+    fn lambda_call_with_array() {
+        let mut vars = HashMap::new();
+        let lam = Value::Lambda { param: "x".to_string(), body: "x*x".to_string() };
+        vars.insert("sq".to_string(), lam);
+        let v = evaluate_expression("sq({1,2,4})", &vars).unwrap();
+        assert!(approx_arr(&array(&v), &[1.0, 4.0, 16.0]));
+    }
+
+    #[test]
+    fn lambda_literal_parse() {
+        let mut vars = HashMap::new();
+        let lam = evaluate_expression("(|x| x+1)", &vars).unwrap();
+        vars.insert("inc".to_string(), lam);
+        assert!(approx(scalar(&evaluate_expression("inc(5)", &vars).unwrap()), 6.0));
     }
 
     #[test]

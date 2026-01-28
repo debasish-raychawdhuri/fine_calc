@@ -16,6 +16,7 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Variables: assign with `x = expr`, use in later expressions
 - Nested parentheses support
 - Arrays: range `[n]`, literals `{x1, x2, ...}`, element-wise operations with broadcasting (including comparisons and booleans)
+- Lambdas: define with `(|x| expr)`, call with `name(arg)`, works with scalars and arrays
 
 ## Keybindings
 
@@ -103,4 +104,14 @@ fine_calc
 1
 >> 3 > 2 && 1 == 1
 1
+>> sq = (|x| x*x)
+(|x| x*x)
+>> sq(3)
+9
+>> sq({1, 2, 4})
+{1, 4, 16}
+>> inc = (|x| x+1)
+(|x| x+1)
+>> inc(10)
+11
 ```

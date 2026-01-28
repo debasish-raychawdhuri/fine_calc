@@ -1,9 +1,12 @@
 use ncurses::*;
 use std::collections::HashMap;
 
+mod value;
+use value::Value;
+
 lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
 
-fn evaluate_expression(input: &str, vars: &HashMap<String, f64>) -> Result<f64, String> {
+fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Value, String> {
     let input = input.trim();
     if input.is_empty() {
         return Err("Empty expression".to_string());
@@ -39,7 +42,7 @@ fn main() {
     let mut input_history: Vec<String> = Vec::new();
     let mut hist_idx: usize = 0;
     let mut saved_input = String::new();
-    let mut variables: HashMap<String, f64> = HashMap::new();
+    let mut variables: HashMap<String, Value> = HashMap::new();
 
     loop {
         let max_y = getmaxy(stdscr()) as usize;
@@ -220,11 +223,11 @@ fn main() {
                     let result = evaluate_expression(expr_str, &variables);
                     match result {
                         Ok(res) => {
+                            history.push(format!(">> {}", input));
+                            history.push(format!("{}", &res));
                             if let Some(name) = var_name {
                                 variables.insert(name, res);
                             }
-                            history.push(format!(">> {}", input));
-                            history.push(format!("{}", res));
                         }
                         Err(e) => {
                             history.push(format!(">> {}", input));
@@ -255,89 +258,104 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn eval(expr: &str) -> Result<f64, String> {
+    fn eval(expr: &str) -> Result<Value, String> {
         evaluate_expression(expr, &HashMap::new())
+    }
+
+    fn scalar(v: &Value) -> f64 {
+        v.as_scalar().expect("expected scalar")
+    }
+
+    fn array(v: &Value) -> Vec<f64> {
+        match v {
+            Value::Array(a) => a.clone(),
+            _ => panic!("expected array"),
+        }
     }
 
     fn approx(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
     }
 
+    fn approx_arr(a: &[f64], b: &[f64]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| approx(*x, *y))
+    }
+
     #[test]
     fn basic_arithmetic() {
-        assert!(approx(eval("2+3").unwrap(), 5.0));
-        assert!(approx(eval("10-4").unwrap(), 6.0));
-        assert!(approx(eval("3*5").unwrap(), 15.0));
-        assert!(approx(eval("8/2").unwrap(), 4.0));
+        assert!(approx(scalar(&eval("2+3").unwrap()), 5.0));
+        assert!(approx(scalar(&eval("10-4").unwrap()), 6.0));
+        assert!(approx(scalar(&eval("3*5").unwrap()), 15.0));
+        assert!(approx(scalar(&eval("8/2").unwrap()), 4.0));
     }
 
     #[test]
     fn exponentiation() {
-        assert!(approx(eval("2^10").unwrap(), 1024.0));
+        assert!(approx(scalar(&eval("2^10").unwrap()), 1024.0));
     }
 
     #[test]
     fn negative_result() {
-        assert!(approx(eval("3-5").unwrap(), -2.0));
+        assert!(approx(scalar(&eval("3-5").unwrap()), -2.0));
     }
 
     #[test]
     fn decimal_numbers() {
-        assert!(approx(eval("1.5+2.5").unwrap(), 4.0));
-        assert!(approx(eval("0.1*10").unwrap(), 1.0));
+        assert!(approx(scalar(&eval("1.5+2.5").unwrap()), 4.0));
+        assert!(approx(scalar(&eval("0.1*10").unwrap()), 1.0));
     }
 
     #[test]
     fn constants() {
-        assert!(approx(eval("pi").unwrap(), std::f64::consts::PI));
-        assert!(approx(eval("e").unwrap(), std::f64::consts::E));
+        assert!(approx(scalar(&eval("pi").unwrap()), std::f64::consts::PI));
+        assert!(approx(scalar(&eval("e").unwrap()), std::f64::consts::E));
     }
 
     #[test]
     fn trig_functions() {
-        assert!(approx(eval("sin(0)").unwrap(), 0.0));
-        assert!(approx(eval("cos(0)").unwrap(), 1.0));
-        assert!(approx(eval("tan(0)").unwrap(), 0.0));
-        assert!(approx(eval("asin(1)").unwrap(), std::f64::consts::FRAC_PI_2));
-        assert!(approx(eval("acos(1)").unwrap(), 0.0));
-        assert!(approx(eval("atan(1)").unwrap(), std::f64::consts::FRAC_PI_4));
+        assert!(approx(scalar(&eval("sin(0)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("cos(0)").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("tan(0)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("asin(1)").unwrap()), std::f64::consts::FRAC_PI_2));
+        assert!(approx(scalar(&eval("acos(1)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("atan(1)").unwrap()), std::f64::consts::FRAC_PI_4));
     }
 
     #[test]
     fn hyperbolic_functions() {
-        assert!(approx(eval("sinh(0)").unwrap(), 0.0));
-        assert!(approx(eval("cosh(0)").unwrap(), 1.0));
-        assert!(approx(eval("tanh(0)").unwrap(), 0.0));
-        assert!(approx(eval("asinh(0)").unwrap(), 0.0));
-        assert!(approx(eval("acosh(1)").unwrap(), 0.0));
-        assert!(approx(eval("atanh(0)").unwrap(), 0.0));
+        assert!(approx(scalar(&eval("sinh(0)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("cosh(0)").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("tanh(0)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("asinh(0)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("acosh(1)").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("atanh(0)").unwrap()), 0.0));
     }
 
     #[test]
     fn parentheses() {
-        assert!(approx(eval("(2+3)*4").unwrap(), 20.0));
-        assert!(approx(eval("((1+2)*(3+4))").unwrap(), 21.0));
+        assert!(approx(scalar(&eval("(2+3)*4").unwrap()), 20.0));
+        assert!(approx(scalar(&eval("((1+2)*(3+4))").unwrap()), 21.0));
     }
 
     #[test]
     fn nested_functions() {
-        assert!(approx(eval("sin(pi/2)").unwrap(), 1.0));
-        assert!(approx(eval("cos(2*pi)").unwrap(), 1.0));
+        assert!(approx(scalar(&eval("sin(pi/2)").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("cos(2*pi)").unwrap()), 1.0));
     }
 
     #[test]
     fn variables() {
         let mut vars = HashMap::new();
-        vars.insert("x".to_string(), 10.0);
-        vars.insert("y".to_string(), 3.0);
-        assert!(approx(evaluate_expression("x+y", &vars).unwrap(), 13.0));
-        assert!(approx(evaluate_expression("x*y", &vars).unwrap(), 30.0));
+        vars.insert("x".to_string(), Value::Scalar(10.0));
+        vars.insert("y".to_string(), Value::Scalar(3.0));
+        assert!(approx(scalar(&evaluate_expression("x+y", &vars).unwrap()), 13.0));
+        assert!(approx(scalar(&evaluate_expression("x*y", &vars).unwrap()), 30.0));
     }
 
     #[test]
     fn complex_expressions() {
-        assert!(approx(eval("2^3+sin(pi/2)*4-1").unwrap(), 11.0));
-        assert!(approx(eval("(2+3)*(4-1)/3").unwrap(), 5.0));
+        assert!(approx(scalar(&eval("2^3+sin(pi/2)*4-1").unwrap()), 11.0));
+        assert!(approx(scalar(&eval("(2+3)*(4-1)/3").unwrap()), 5.0));
     }
 
     #[test]
@@ -357,7 +375,46 @@ mod tests {
 
     #[test]
     fn operator_precedence() {
-        // Stack-based eval: 2+3*4 => push 2, then 3*4=12, sum=14
-        assert!(approx(eval("2+3*4").unwrap(), 14.0));
+        assert!(approx(scalar(&eval("2+3*4").unwrap()), 14.0));
+    }
+
+    // Array tests
+
+    #[test]
+    fn range_array() {
+        let v = eval("[5]").unwrap();
+        assert!(approx_arr(&array(&v), &[0.0, 1.0, 2.0, 3.0, 4.0]));
+    }
+
+    #[test]
+    fn explicit_array() {
+        let v = eval("{1,2,3}").unwrap();
+        assert!(approx_arr(&array(&v), &[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn array_scalar_add() {
+        let v = eval("{1,2,3}+1").unwrap();
+        assert!(approx_arr(&array(&v), &[2.0, 3.0, 4.0]));
+    }
+
+    #[test]
+    fn array_array_mul() {
+        let v = eval("{1,2,3}*{4,5,6}").unwrap();
+        assert!(approx_arr(&array(&v), &[4.0, 10.0, 18.0]));
+    }
+
+    #[test]
+    fn sin_array() {
+        let v = eval("sin({0,pi})").unwrap();
+        let a = array(&v);
+        assert!(approx(a[0], 0.0));
+        assert!(approx(a[1], 0.0));
+    }
+
+    #[test]
+    fn zero_pad_behavior() {
+        let v = eval("{1,2,3}+{10,20}").unwrap();
+        assert!(approx_arr(&array(&v), &[11.0, 22.0, 3.0]));
     }
 }

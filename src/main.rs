@@ -11,7 +11,7 @@ fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Val
     if input.is_empty() {
         return Err("Empty expression".to_string());
     }
-    expr::ExprParser::new()
+    expr::TopExprParser::new()
         .parse(vars, input)
         .map_err(|e| match e {
             lalrpop_util::ParseError::User { error } => error.to_string(),
@@ -210,15 +210,30 @@ fn main() {
             KEY_ENTER | 10 => {
                 if !input.trim().is_empty() {
                     let trimmed = input.trim();
-                    let (var_name, expr_str) = if let Some(eq_pos) = trimmed.find('=') {
-                        let lhs = trimmed[..eq_pos].trim();
-                        if !lhs.is_empty() && lhs.chars().all(|c| c.is_alphanumeric() || c == '_') && (lhs.starts_with('_') || lhs.chars().next().unwrap().is_alphabetic()) {
-                            (Some(lhs.to_string()), trimmed[eq_pos + 1..].trim())
+                    let (var_name, expr_str) = {
+                        // Find a standalone '=' that is not part of ==, !=, >=, <=
+                        let mut assign_pos = None;
+                        let bytes = trimmed.as_bytes();
+                        for i in 0..bytes.len() {
+                            if bytes[i] == b'=' {
+                                let prev = if i > 0 { bytes[i - 1] } else { 0 };
+                                let next = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+                                if prev != b'!' && prev != b'>' && prev != b'<' && prev != b'=' && next != b'=' {
+                                    assign_pos = Some(i);
+                                    break;
+                                }
+                            }
+                        }
+                        if let Some(eq_pos) = assign_pos {
+                            let lhs = trimmed[..eq_pos].trim();
+                            if !lhs.is_empty() && lhs.chars().all(|c| c.is_alphanumeric() || c == '_') && (lhs.starts_with('_') || lhs.chars().next().unwrap().is_alphabetic()) {
+                                (Some(lhs.to_string()), trimmed[eq_pos + 1..].trim())
+                            } else {
+                                (None, trimmed)
+                            }
                         } else {
                             (None, trimmed)
                         }
-                    } else {
-                        (None, trimmed)
                     };
                     let result = evaluate_expression(expr_str, &variables);
                     match result {
@@ -416,5 +431,64 @@ mod tests {
     fn zero_pad_behavior() {
         let v = eval("{1,2,3}+{10,20}").unwrap();
         assert!(approx_arr(&array(&v), &[11.0, 22.0, 3.0]));
+    }
+
+    // Boolean and comparison tests
+
+    #[test]
+    fn comparison_gt() {
+        assert!(approx(scalar(&eval("3>2").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("2>3").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn comparison_lt() {
+        assert!(approx(scalar(&eval("2<3").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("3<2").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn comparison_ge_le() {
+        assert!(approx(scalar(&eval("3>=3").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("2>=3").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("3<=3").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("4<=3").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn comparison_eq_ne() {
+        assert!(approx(scalar(&eval("1==1").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("1==2").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("1!=2").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("1!=1").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn boolean_and_or() {
+        assert!(approx(scalar(&eval("1&&1").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("1&&0").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("0||1").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("0||0").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn boolean_not() {
+        assert!(approx(scalar(&eval("!0").unwrap()), 1.0));
+        assert!(approx(scalar(&eval("!1").unwrap()), 0.0));
+        assert!(approx(scalar(&eval("!5").unwrap()), 0.0));
+    }
+
+    #[test]
+    fn comparison_array_broadcast() {
+        let v = eval("{1,2,-1}>0").unwrap();
+        assert!(approx_arr(&array(&v), &[1.0, 1.0, 0.0]));
+    }
+
+    #[test]
+    fn compound_boolean() {
+        // (3>2) && (1==1) => 1 && 1 => 1
+        assert!(approx(scalar(&eval("3>2&&1==1").unwrap()), 1.0));
+        // (1>2) || (3<4) => 0 || 1 => 1
+        assert!(approx(scalar(&eval("1>2||3<4").unwrap()), 1.0));
     }
 }

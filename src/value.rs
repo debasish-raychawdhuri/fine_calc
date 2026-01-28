@@ -83,6 +83,46 @@ impl Value {
         }
     }
 
+    pub fn gt(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if a > b { 1.0 } else { 0.0 })
+    }
+
+    pub fn lt(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if a < b { 1.0 } else { 0.0 })
+    }
+
+    pub fn ge(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if a >= b { 1.0 } else { 0.0 })
+    }
+
+    pub fn le(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if a <= b { 1.0 } else { 0.0 })
+    }
+
+    pub fn eq_val(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if (a - b).abs() < 1e-10 { 1.0 } else { 0.0 })
+    }
+
+    pub fn ne_val(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if (a - b).abs() >= 1e-10 { 1.0 } else { 0.0 })
+    }
+
+    pub fn and(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 })
+    }
+
+    pub fn or(self, other: Value) -> Value {
+        self.broadcast_op(other, |a, b| if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 })
+    }
+
+    pub fn not(self) -> Value {
+        self.apply_fn(|v| if v == 0.0 { 1.0 } else { 0.0 })
+    }
+
+    pub fn neg(self) -> Value {
+        self.apply_fn(|v| -v)
+    }
+
     pub fn range(self) -> Result<Value, &'static str> {
         match self {
             Value::Scalar(v) => {

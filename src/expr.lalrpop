@@ -3,7 +3,31 @@ use crate::value::Value;
 
 grammar(vars: &HashMap<String, Value>);
 
-pub Expr: Value = {
+pub TopExpr: Value = {
+    <l:TopExpr> "||" <r:AndExpr> => l.or(r),
+    AndExpr,
+};
+
+AndExpr: Value = {
+    <l:AndExpr> "&&" <r:CmpEq> => l.and(r),
+    CmpEq,
+};
+
+CmpEq: Value = {
+    <l:CmpEq> "==" <r:CmpRel> => l.eq_val(r),
+    <l:CmpEq> "!=" <r:CmpRel> => l.ne_val(r),
+    CmpRel,
+};
+
+CmpRel: Value = {
+    <l:CmpRel> ">=" <r:Expr> => l.ge(r),
+    <l:CmpRel> "<=" <r:Expr> => l.le(r),
+    <l:CmpRel> ">" <r:Expr> => l.gt(r),
+    <l:CmpRel> "<" <r:Expr> => l.lt(r),
+    Expr,
+};
+
+Expr: Value = {
     <l:Expr> "+" <r:Factor> => l.add(r),
     <l:Expr> "-" <r:Factor> => l.sub(r),
     Factor,
@@ -16,7 +40,13 @@ Factor: Value = {
 };
 
 Power: Value = {
-    <base:Atom> "^" <exp:Power> => base.powf(exp),
+    <base:Unary> "^" <exp:Power> => base.powf(exp),
+    Unary,
+};
+
+Unary: Value = {
+    "-" <Unary> => <>.neg(),
+    "!" <Unary> => <>.not(),
     Atom,
 };
 
@@ -29,11 +59,11 @@ Comma<T>: Vec<T> = {
 
 Atom: Value = {
     Num,
-    "(" <Expr> ")",
-    "[" <e:Expr> "]" =>? {
+    "(" <TopExpr> ")",
+    "[" <e:TopExpr> "]" =>? {
         e.range().map_err(|msg| lalrpop_util::ParseError::User { error: msg })
     },
-    r"\{" <elems:Comma<Expr>> r"\}" =>? {
+    r"\{" <elems:Comma<TopExpr>> r"\}" =>? {
         let mut scalars = Vec::new();
         for elem in elems {
             match elem.as_scalar() {
@@ -45,7 +75,7 @@ Atom: Value = {
         }
         Ok(Value::Array(scalars))
     },
-    <name:Ident> "(" <arg:Expr> ")" =>? {
+    <name:Ident> "(" <arg:TopExpr> ")" =>? {
         match name {
             "sin" => Ok(arg.apply_fn(f64::sin)),
             "cos" => Ok(arg.apply_fn(f64::cos)),

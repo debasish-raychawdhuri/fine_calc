@@ -1,0 +1,63 @@
+use std::collections::HashMap;
+
+grammar(vars: &HashMap<String, f64>);
+
+pub Expr: f64 = {
+    <l:Expr> "+" <r:Factor> => l + r,
+    <l:Expr> "-" <r:Factor> => l - r,
+    Factor,
+};
+
+Factor: f64 = {
+    <l:Factor> "*" <r:Power> => l * r,
+    <l:Factor> "/" <r:Power> => l / r,
+    Power,
+};
+
+Power: f64 = {
+    <base:Atom> "^" <exp:Power> => base.powf(exp),
+    Atom,
+};
+
+Atom: f64 = {
+    Num,
+    "(" <Expr> ")",
+    <name:Ident> "(" <arg:Expr> ")" =>? {
+        match name {
+            "sin" => Ok(arg.sin()),
+            "cos" => Ok(arg.cos()),
+            "tan" => Ok(arg.tan()),
+            "asin" => Ok(arg.asin()),
+            "acos" => Ok(arg.acos()),
+            "atan" => Ok(arg.atan()),
+            "sinh" => Ok(arg.sinh()),
+            "cosh" => Ok(arg.cosh()),
+            "tanh" => Ok(arg.tanh()),
+            "asinh" => Ok(arg.asinh()),
+            "acosh" => Ok(arg.acosh()),
+            "atanh" => Ok(arg.atanh()),
+            _ => Err(lalrpop_util::ParseError::User {
+                error: "Unknown function",
+            }),
+        }
+    },
+    <name:Ident> =>? {
+        match name {
+            "pi" => Ok(std::f64::consts::PI),
+            "e" => Ok(std::f64::consts::E),
+            _ => {
+                if let Some(&val) = vars.get(name) {
+                    Ok(val)
+                } else {
+                    Err(lalrpop_util::ParseError::User {
+                        error: "Unknown identifier",
+                    })
+                }
+            }
+        }
+    },
+};
+
+Num: f64 = <s:r"[0-9]+(\.[0-9]+)?"> => s.parse().unwrap();
+
+Ident: &'input str = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s;

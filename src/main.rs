@@ -1,151 +1,19 @@
 use ncurses::*;
 use std::collections::HashMap;
 
-fn evaluate_expression(expr: &str, vars: &HashMap<String, f64>) -> Result<f64, String> {
-    let expr = expr.trim();
-    if expr.is_empty() {
+lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
+
+fn evaluate_expression(input: &str, vars: &HashMap<String, f64>) -> Result<f64, String> {
+    let input = input.trim();
+    if input.is_empty() {
         return Err("Empty expression".to_string());
     }
-
-    if let Ok(num) = expr.parse::<f64>() {
-        return Ok(num);
-    }
-
-    let mut stack = Vec::new();
-    let mut num = 0.0;
-    let mut sign = '+';
-    let mut i = 0;
-    let chars: Vec<char> = expr.chars().collect();
-
-    while i < chars.len() {
-        let c = chars[i];
-        if c.is_digit(10) || c == '.' {
-            let mut num_str = String::new();
-            while i < chars.len() && (chars[i].is_digit(10) || chars[i] == '.') {
-                num_str.push(chars[i]);
-                i += 1;
-            }
-            num = num_str.parse::<f64>().unwrap();
-            continue;
-        }
-
-        if c.is_alphabetic() || c == '_' {
-            let mut func_name = String::new();
-            while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
-                func_name.push(chars[i]);
-                i += 1;
-            }
-            // Expect '(' after function name
-            if i < chars.len() && chars[i] == '(' {
-                let mut paren_expr = String::new();
-                let mut balance = 1;
-                i += 1;
-                while i < chars.len() && balance > 0 {
-                    if chars[i] == '(' {
-                        balance += 1;
-                    } else if chars[i] == ')' {
-                        balance -= 1;
-                    }
-                    if balance > 0 {
-                        paren_expr.push(chars[i]);
-                    }
-                    i += 1;
-                }
-                let arg = evaluate_expression(&paren_expr, vars)?;
-                num = match func_name.as_str() {
-                    "sin" => arg.sin(),
-                    "cos" => arg.cos(),
-                    "tan" => arg.tan(),
-                    "asin" => arg.asin(),
-                    "acos" => arg.acos(),
-                    "atan" => arg.atan(),
-                    "sinh" => arg.sinh(),
-                    "cosh" => arg.cosh(),
-                    "tanh" => arg.tanh(),
-                    "asinh" => arg.asinh(),
-                    "acosh" => arg.acosh(),
-                    "atanh" => arg.atanh(),
-                    _ => return Err(format!("Unknown function: {}", func_name)),
-                };
-                continue;
-            } else {
-                num = match func_name.as_str() {
-                    "pi" => std::f64::consts::PI,
-                    "e" => std::f64::consts::E,
-                    _ => {
-                        if let Some(&val) = vars.get(&func_name) {
-                            val
-                        } else {
-                            return Err(format!("Unknown identifier: {}", func_name));
-                        }
-                    }
-                };
-                continue;
-            }
-        }
-
-        if c == '(' {
-            let mut paren_expr = String::new();
-            let mut balance = 1;
-            i += 1;
-            while i < chars.len() && balance > 0 {
-                if chars[i] == '(' {
-                    balance += 1;
-                } else if chars[i] == ')' {
-                    balance -= 1;
-                }
-                if balance > 0 {
-                    paren_expr.push(chars[i]);
-                }
-                i += 1;
-            }
-            num = evaluate_expression(&paren_expr, vars)?;
-            continue;
-        }
-
-        if !c.is_whitespace() {
-            match sign {
-                '+' => stack.push(num),
-                '-' => stack.push(-num),
-                '*' => {
-                    let top = stack.pop().unwrap_or(0.0);
-                    stack.push(top * num);
-                }
-                '/' => {
-                    let top = stack.pop().unwrap_or(0.0);
-                    stack.push(top / num);
-                }
-                '^' => {
-                    let top = stack.pop().unwrap_or(0.0);
-                    stack.push(top.powf(num));
-                }
-                _ => return Err("Invalid operator".to_string()),
-            }
-            sign = c;
-            num = 0.0;
-        }
-        i += 1;
-    }
-
-    match sign {
-        '+' => stack.push(num),
-        '-' => stack.push(-num),
-        '*' => {
-            let top = stack.pop().unwrap_or(0.0);
-            stack.push(top * num);
-        }
-        '/' => {
-            let top = stack.pop().unwrap_or(0.0);
-            stack.push(top / num);
-        }
-        '^' => {
-            let top = stack.pop().unwrap_or(0.0);
-            stack.push(top.powf(num));
-        }
-        _ => return Err("Invalid operator".to_string()),
-    }
-
-    Ok(stack.iter().sum())
+    expr::ExprParser::new()
+        .parse(vars, input)
+        .map_err(|e| match e {
+            lalrpop_util::ParseError::User { error } => error.to_string(),
+            other => format!("{}", other),
+        })
 }
 
 fn main() {

@@ -10,6 +10,7 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Constants: `pi`, `e`
 - Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
 - Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+- Variables: assign with `x = expr`, use in later expressions
 - Nested parentheses support
 
 ## Keybindings
@@ -66,4 +67,12 @@ fine_calc
 1
 >> 3*4 + 2
 14
+>> x = 5
+5
+>> x * 2
+10
+>> radius = 3
+3
+>> 2 * pi * radius
+18.849555921538759
 ```

@@ -10,9 +10,12 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Constants: `pi`, `e`
 - Trigonometric: `sin`, `cos`, `tan`, `asin`, `acos`, `atan`
 - Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
+- Comparison: `>`, `<`, `>=`, `<=`, `==`, `!=` (return 0 or 1)
+- Boolean: `&&`, `||`, `!` (truthy = nonzero)
+- Unary negation: `-expr`
 - Variables: assign with `x = expr`, use in later expressions
 - Nested parentheses support
-- Arrays: range `[n]`, literals `{x1, x2, ...}`, element-wise operations with broadcasting
+- Arrays: range `[n]`, literals `{x1, x2, ...}`, element-wise operations with broadcasting (including comparisons and booleans)
 
 ## Keybindings
 
@@ -86,4 +89,18 @@ fine_calc
 {0, 0}
 >> {1, 2, 3} + {10, 20}
 {11, 22, 3}
+>> 3 > 2
+1
+>> 1 == 1
+1
+>> {1, 2, -1} > 0
+{1, 1, 0}
+>> !0
+1
+>> 1 && 0
+0
+>> 1 || 0
+1
+>> 3 > 2 && 1 == 1
+1
 ```

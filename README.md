@@ -12,6 +12,7 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Hyperbolic: `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh`
 - Variables: assign with `x = expr`, use in later expressions
 - Nested parentheses support
+- Arrays: range `[n]`, literals `{x1, x2, ...}`, element-wise operations with broadcasting
 
 ## Keybindings
 
@@ -75,4 +76,14 @@ fine_calc
 3
 >> 2 * pi * radius
 18.849555921538759
+>> [5]
+{0, 1, 2, 3, 4}
+>> {1, 2, 3} + 10
+{11, 12, 13}
+>> {1, 2, 3} * {4, 5, 6}
+{4, 10, 18}
+>> sin({0, pi})
+{0, 0}
+>> {1, 2, 3} + {10, 20}
+{11, 22, 3}
 ```

@@ -4,49 +4,49 @@ use crate::value::Value;
 grammar(vars: &HashMap<String, Value>);
 
 pub TopExpr: Value = {
-    <l:TopExpr> "||" <r:AndExpr> => l.or(r),
+    <l:TopExpr> "||" <r:AndExpr> =>? l.or(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     AndExpr,
 };
 
 AndExpr: Value = {
-    <l:AndExpr> "&&" <r:CmpEq> => l.and(r),
+    <l:AndExpr> "&&" <r:CmpEq> =>? l.and(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     CmpEq,
 };
 
 CmpEq: Value = {
-    <l:CmpEq> "==" <r:CmpRel> => l.eq_val(r),
-    <l:CmpEq> "!=" <r:CmpRel> => l.ne_val(r),
+    <l:CmpEq> "==" <r:CmpRel> =>? l.eq_val(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <l:CmpEq> "!=" <r:CmpRel> =>? l.ne_val(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     CmpRel,
 };
 
 CmpRel: Value = {
-    <l:CmpRel> ">=" <r:Expr> => l.ge(r),
-    <l:CmpRel> "<=" <r:Expr> => l.le(r),
-    <l:CmpRel> ">" <r:Expr> => l.gt(r),
-    <l:CmpRel> "<" <r:Expr> => l.lt(r),
+    <l:CmpRel> ">=" <r:Expr> =>? l.ge(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <l:CmpRel> "<=" <r:Expr> =>? l.le(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <l:CmpRel> ">" <r:Expr> =>? l.gt(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <l:CmpRel> "<" <r:Expr> =>? l.lt(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     Expr,
 };
 
 Expr: Value = {
-    <l:Expr> "+" <r:Factor> => l.add(r),
-    <l:Expr> "-" <r:Factor> => l.sub(r),
+    <l:Expr> "+" <r:Factor> =>? l.add(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <l:Expr> "-" <r:Factor> =>? l.sub(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     Factor,
 };
 
 Factor: Value = {
-    <l:Factor> "*" <r:Power> => l.mul(r),
-    <l:Factor> "/" <r:Power> => l.div(r),
+    <l:Factor> "*" <r:Power> =>? l.mul(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    <l:Factor> "/" <r:Power> =>? l.div(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     Power,
 };
 
 Power: Value = {
-    <base:Unary> "^" <exp:Power> => base.powf(exp),
+    <base:Unary> "^" <exp:Power> =>? base.powf(exp).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     Unary,
 };
 
 Unary: Value = {
-    "-" <Unary> => <>.neg(),
-    "!" <Unary> => <>.not(),
+    "-" <u:Unary> =>? u.neg().map_err(|e| lalrpop_util::ParseError::User { error: e }),
+    "!" <u:Unary> =>? u.not().map_err(|e| lalrpop_util::ParseError::User { error: e }),
     Atom,
 };
 
@@ -59,52 +59,141 @@ Comma<T>: Vec<T> = {
 
 Atom: Value = {
     Num,
+    // Tuple literal: (a, b) or (a, b, c, ...)
+    "(" <first:TopExpr> "," <rest:Comma<TopExpr>> ")" =>? {
+        let mut elems = vec![first];
+        elems.extend(rest);
+        Value::make_tuple(elems).map_err(|e| lalrpop_util::ParseError::User { error: e })
+    },
+    // Grouping parentheses (single expression)
     "(" <TopExpr> ")",
     "[" <e:TopExpr> "]" =>? {
         e.range().map_err(|msg| lalrpop_util::ParseError::User { error: msg })
     },
     r"\{" <elems:Comma<TopExpr>> r"\}" =>? {
-        let mut scalars = Vec::new();
-        for elem in elems {
-            match elem.as_scalar() {
-                Some(v) => scalars.push(v),
-                None => return Err(lalrpop_util::ParseError::User {
-                    error: "Array literal elements must be scalars",
-                }),
+        // Check if all elements are scalars -> Array
+        // If any element is Tuple -> TupleArray
+        // If any element is TupleArray -> error for now (could concatenate)
+        let all_scalars = elems.iter().all(|e| matches!(e, Value::Scalar(_)));
+        if all_scalars {
+            let scalars: Vec<f64> = elems.iter().map(|e| e.as_scalar().unwrap()).collect();
+            Ok(Value::Array(scalars))
+        } else {
+            // Check if all are tuples of the same width, or scalars (width 1)
+            let mut width: Option<usize> = None;
+            for e in &elems {
+                let w = match e {
+                    Value::Scalar(_) => 1,
+                    Value::Tuple(t) => t.len(),
+                    Value::Array(_) => return Err(lalrpop_util::ParseError::User {
+                        error: "Cannot mix arrays in tuple array literal",
+                    }),
+                    Value::TupleArray { .. } => return Err(lalrpop_util::ParseError::User {
+                        error: "Cannot nest tuple arrays in literal",
+                    }),
+                    Value::Lambda { .. } => return Err(lalrpop_util::ParseError::User {
+                        error: "Cannot include lambda in array literal",
+                    }),
+                };
+                match width {
+                    None => width = Some(w),
+                    Some(prev) if prev != w => return Err(lalrpop_util::ParseError::User {
+                        error: "Tuple array elements must have same width",
+                    }),
+                    _ => {}
+                }
             }
+            let w = width.unwrap_or(1);
+            let mut data = Vec::with_capacity(elems.len() * w);
+            for e in elems {
+                match e {
+                    Value::Scalar(v) => data.push(v),
+                    Value::Tuple(t) => data.extend(t),
+                    _ => {}
+                }
+            }
+            Ok(Value::TupleArray { width: w, data })
         }
-        Ok(Value::Array(scalars))
     },
     <name:Ident> "(" <arg:TopExpr> ")" =>? {
         match name {
-            "sin" => Ok(arg.apply_fn(f64::sin)),
-            "cos" => Ok(arg.apply_fn(f64::cos)),
-            "tan" => Ok(arg.apply_fn(f64::tan)),
-            "asin" => Ok(arg.apply_fn(f64::asin)),
-            "acos" => Ok(arg.apply_fn(f64::acos)),
-            "atan" => Ok(arg.apply_fn(f64::atan)),
-            "sinh" => Ok(arg.apply_fn(f64::sinh)),
-            "cosh" => Ok(arg.apply_fn(f64::cosh)),
-            "tanh" => Ok(arg.apply_fn(f64::tanh)),
-            "asinh" => Ok(arg.apply_fn(f64::asinh)),
-            "acosh" => Ok(arg.apply_fn(f64::acosh)),
-            "atanh" => Ok(arg.apply_fn(f64::atanh)),
-            "sqrt" => Ok(arg.apply_fn(f64::sqrt)),
-            "abs" => Ok(arg.apply_fn(f64::abs)),
-            "ln" => Ok(arg.apply_fn(f64::ln)),
-            "log2" => Ok(arg.apply_fn(f64::log2)),
-            "log10" => Ok(arg.apply_fn(f64::log10)),
-            "exp" => Ok(arg.apply_fn(f64::exp)),
-            "floor" => Ok(arg.apply_fn(f64::floor)),
-            "ceil" => Ok(arg.apply_fn(f64::ceil)),
-            "round" => Ok(arg.apply_fn(f64::round)),
+            "sin" => arg.apply_fn(f64::sin).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "cos" => arg.apply_fn(f64::cos).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "tan" => arg.apply_fn(f64::tan).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "asin" => arg.apply_fn(f64::asin).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "acos" => arg.apply_fn(f64::acos).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "atan" => arg.apply_fn(f64::atan).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "sinh" => arg.apply_fn(f64::sinh).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "cosh" => arg.apply_fn(f64::cosh).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "tanh" => arg.apply_fn(f64::tanh).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "asinh" => arg.apply_fn(f64::asinh).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "acosh" => arg.apply_fn(f64::acosh).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "atanh" => arg.apply_fn(f64::atanh).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "sqrt" => arg.apply_fn(f64::sqrt).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "abs" => arg.apply_fn(f64::abs).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "ln" => arg.apply_fn(f64::ln).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "log2" => arg.apply_fn(f64::log2).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "log10" => arg.apply_fn(f64::log10).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "exp" => arg.apply_fn(f64::exp).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "floor" => arg.apply_fn(f64::floor).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "ceil" => arg.apply_fn(f64::ceil).map_err(|e| lalrpop_util::ParseError::User { error: e }),
+            "round" => arg.apply_fn(f64::round).map_err(|e| lalrpop_util::ParseError::User { error: e }),
             _ => {
-                if let Some(Value::Lambda { param, body }) = vars.get(name) {
-                    let mut inner = vars.clone();
-                    inner.insert(param.clone(), arg);
-                    crate::expr::TopExprParser::new()
-                        .parse(&inner, body)
-                        .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })
+                if let Some(Value::Lambda { params, body }) = vars.get(name) {
+                    if params.len() == 1 {
+                        // Single-param lambda: bind directly
+                        let mut inner = vars.clone();
+                        inner.insert(params[0].clone(), arg);
+                        crate::expr::TopExprParser::new()
+                            .parse(&inner, body)
+                            .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })
+                    } else {
+                        // Multi-param lambda: expects Tuple or TupleArray
+                        match arg {
+                            Value::Tuple(ref t) => {
+                                if t.len() != params.len() {
+                                    return Err(lalrpop_util::ParseError::User {
+                                        error: "Tuple length doesn't match lambda parameters",
+                                    });
+                                }
+                                let mut inner = vars.clone();
+                                for (p, v) in params.iter().zip(t.iter()) {
+                                    inner.insert(p.clone(), Value::Scalar(*v));
+                                }
+                                crate::expr::TopExprParser::new()
+                                    .parse(&inner, body)
+                                    .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })
+                            }
+                            Value::TupleArray { width, ref data } => {
+                                if width != params.len() {
+                                    return Err(lalrpop_util::ParseError::User {
+                                        error: "Tuple width doesn't match lambda parameters",
+                                    });
+                                }
+                                let count = data.len() / width;
+                                let mut results = Vec::with_capacity(count);
+                                for i in 0..count {
+                                    let mut inner = vars.clone();
+                                    for (j, p) in params.iter().enumerate() {
+                                        inner.insert(p.clone(), Value::Scalar(data[i * width + j]));
+                                    }
+                                    let res = crate::expr::TopExprParser::new()
+                                        .parse(&inner, body)
+                                        .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })?;
+                                    match res.as_scalar() {
+                                        Some(v) => results.push(v),
+                                        None => return Err(lalrpop_util::ParseError::User {
+                                            error: "Lambda must return scalar when mapping over tuple array",
+                                        }),
+                                    }
+                                }
+                                Ok(Value::Array(results))
+                            }
+                            _ => Err(lalrpop_util::ParseError::User {
+                                error: "Multi-param lambda requires tuple or tuple array argument",
+                            }),
+                        }
+                    }
                 } else {
                     Err(lalrpop_util::ParseError::User {
                         error: "Unknown function",

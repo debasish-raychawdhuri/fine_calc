@@ -6,31 +6,98 @@ use value::Value;
 
 lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
 
+/// Check if a string is a valid identifier
+fn is_valid_param(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && (s.starts_with('_') || s.chars().next().unwrap().is_alphabetic())
+}
+
+/// Parse parameter list from a string like "x" or "(x,y,z)"
+fn parse_params(param_part: &str) -> Option<Vec<String>> {
+    let param_part = param_part.trim();
+    if param_part.starts_with('(') && param_part.ends_with(')') {
+        // Multi-param: (x,y,z)
+        let params_str = &param_part[1..param_part.len() - 1];
+        let params: Vec<String> = params_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect();
+        if params.iter().all(|p| is_valid_param(p)) && !params.is_empty() {
+            Some(params)
+        } else {
+            None
+        }
+    } else {
+        // Single param: x
+        if is_valid_param(param_part) {
+            Some(vec![param_part.to_string()])
+        } else {
+            None
+        }
+    }
+}
+
 /// Try to parse a lambda literal from a string starting at position `start`.
+/// Supports both `(|x| body)` and `|x| body` syntax.
 /// Returns Some((Lambda, end_position)) if successful, None otherwise.
 fn parse_lambda_at(s: &str, start: usize) -> Option<(Value, usize)> {
     let rest = &s[start..];
-    if !rest.starts_with("(|") {
-        return None;
-    }
 
-    let inner_start = start + 2; // after "(|"
+    // Check for both syntaxes: (|...| or |...|
+    let (has_outer_paren, inner_start) = if rest.starts_with("(|") {
+        (true, start + 2)
+    } else if rest.starts_with('|') {
+        (false, start + 1)
+    } else {
+        return None;
+    };
+
     let inner = &s[inner_start..];
 
     // Find the second | that ends params
     let pipe_pos = inner.find('|')?;
-    let param_part = inner[..pipe_pos].trim();
+    let param_part = &inner[..pipe_pos];
+    let params = parse_params(param_part)?;
 
-    // Find matching ) for the lambda - need to track paren depth
+    // Find end of body
     let body_start = inner_start + pipe_pos + 1;
-    let mut depth = 1; // we're inside one (
-    let mut end_pos = body_start;
+    let mut depth: i32 = if has_outer_paren { 1 } else { 0 };
+    let mut bracket_depth: i32 = 0;
+    let mut brace_depth: i32 = 0;
+    let mut end_pos = s.len();
+
     for (i, c) in s[body_start..].char_indices() {
         match c {
             '(' => depth += 1,
             ')' => {
-                depth -= 1;
-                if depth == 0 {
+                if depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+                    // End of lambda (unmatched ) means we're done)
+                    end_pos = body_start + i;
+                    break;
+                }
+                depth = depth.saturating_sub(1);
+                if has_outer_paren && depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+                    end_pos = body_start + i;
+                    break;
+                }
+            }
+            '[' => bracket_depth += 1,
+            ']' => {
+                if bracket_depth == 0 && depth == 0 && brace_depth == 0 {
+                    // End of filter lambda
+                    end_pos = body_start + i;
+                    break;
+                }
+                bracket_depth = bracket_depth.saturating_sub(1);
+            }
+            '{' => brace_depth += 1,
+            '}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+            }
+            ',' => {
+                if depth == 0 && bracket_depth == 0 && brace_depth == 0 && !has_outer_paren {
+                    // End of lambda in a list context
                     end_pos = body_start + i;
                     break;
                 }
@@ -39,44 +106,15 @@ fn parse_lambda_at(s: &str, start: usize) -> Option<(Value, usize)> {
         }
     }
 
-    if depth != 0 {
-        return None; // unbalanced
-    }
-
     let body = s[body_start..end_pos].trim();
     if body.is_empty() {
         return None;
     }
 
-    // Parse params
-    let params = if param_part.starts_with('(') && param_part.ends_with(')') {
-        // Multi-param: (x,y,z)
-        let params_str = &param_part[1..param_part.len() - 1];
-        let params: Vec<String> = params_str
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .collect();
-        let valid = params.iter().all(|p| {
-            !p.is_empty()
-                && p.chars().all(|c| c.is_alphanumeric() || c == '_')
-                && (p.starts_with('_') || p.chars().next().unwrap().is_alphabetic())
-        });
-        if !valid || params.is_empty() {
-            return None;
-        }
-        params
-    } else {
-        // Single param: x
-        if param_part.is_empty()
-            || !param_part.chars().all(|c| c.is_alphanumeric() || c == '_')
-            || (!param_part.starts_with('_') && !param_part.chars().next().unwrap().is_alphabetic())
-        {
-            return None;
-        }
-        vec![param_part.to_string()]
-    };
+    // For (|x| body) syntax, consume the closing )
+    let final_end = if has_outer_paren { end_pos + 1 } else { end_pos };
 
-    Some((Value::Lambda { params, body: body.to_string() }, end_pos + 1))
+    Some((Value::Lambda { params, body: body.to_string() }, final_end))
 }
 
 /// Extract all lambda literals from input, replacing them with placeholder variables.
@@ -88,7 +126,13 @@ fn extract_lambdas(input: &str) -> (String, HashMap<String, Value>) {
     let mut lambda_count = 0;
 
     while i < input.len() {
-        if input[i..].starts_with("(|") {
+        // Check for lambda syntax: (|...| or |...|
+        // But avoid matching || (logical or)
+        let rest = &input[i..];
+        let is_lambda_start = rest.starts_with("(|")
+            || (rest.starts_with('|') && !rest.starts_with("||") && rest.len() > 1);
+
+        if is_lambda_start {
             if let Some((lambda, end)) = parse_lambda_at(input, i) {
                 let placeholder = format!("__lambda{}__", lambda_count);
                 lambda_count += 1;
@@ -1399,16 +1443,67 @@ mod tests {
 
     #[test]
     fn user_example_tensor_filter() {
-        // The exact example the user asked about
+        // The exact example the user asked about (with parens)
         let v = eval("([10]**[10])[(|(i,x,y)|x*y>10)]").unwrap();
-        // Should filter pairs where x*y > 10
-        // Pairs like (2,6), (3,4), (4,3), (6,2), etc.
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
-        // Just check that we got some results and they satisfy x*y > 10
         assert!(d.len() > 0);
         for chunk in d.chunks(2) {
             assert!(chunk[0] * chunk[1] > 10.0);
         }
+    }
+
+    // Short lambda syntax tests (without outer parentheses)
+
+    #[test]
+    fn short_lambda_filter() {
+        // |x| body syntax in filter
+        let v = eval("{1, 2, 3, 4, 5}[|(i,x)| x > 2]").unwrap();
+        assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
+    }
+
+    #[test]
+    fn short_lambda_tensor_filter() {
+        // User's preferred syntax: no outer parens
+        let v = eval("([10]**[10])[|(i,x,y)|x*y>10]").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        assert!(d.len() > 0);
+        for chunk in d.chunks(2) {
+            assert!(chunk[0] * chunk[1] > 10.0);
+        }
+    }
+
+    #[test]
+    fn short_lambda_as_value() {
+        // Short lambda at top level
+        let v = eval("|x| x + 1").unwrap();
+        match v {
+            Value::Lambda { params, body } => {
+                assert_eq!(params, vec!["x"]);
+                assert_eq!(body, "x + 1");
+            }
+            _ => panic!("expected lambda"),
+        }
+    }
+
+    #[test]
+    fn short_lambda_multi_param() {
+        // Short multi-param lambda
+        let v = eval("|(x,y)| x + y").unwrap();
+        match v {
+            Value::Lambda { params, body } => {
+                assert_eq!(params, vec!["x", "y"]);
+                assert_eq!(body, "x + y");
+            }
+            _ => panic!("expected lambda"),
+        }
+    }
+
+    #[test]
+    fn logical_or_not_confused_with_lambda() {
+        // || should still be logical or, not lambda
+        let v = eval("1 || 0").unwrap();
+        assert!(approx(scalar(&v), 1.0));
     }
 }

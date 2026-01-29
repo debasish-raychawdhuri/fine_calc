@@ -71,25 +71,18 @@ Postfix: Value = {
             }
             Value::Lambda { ref params, ref body } => {
                 // Lambda filter: array[|(i,x)| predicate]
-                // Lambda receives (index, element) tuple flattened
+                // Lambda receives (index, element...) with tuple decomposition
                 match &base {
                     Value::Array(arr) => {
                         let mut result = Vec::new();
                         for (i, &elem) in arr.iter().enumerate() {
-                            // Build tuple (i, elem) for lambda
+                            // Build tuple (i, elem) for lambda with decomposition
+                            let tuple_elems = vec![i as f64, elem];
+                            let bindings = Value::decompose_elements(&tuple_elems, params.len())
+                                .map_err(|e| lalrpop_util::ParseError::User { error: e })?;
                             let mut inner = vars.clone();
-                            if params.len() == 1 {
-                                // Single param gets the tuple
-                                let tup = Value::Tuple(vec![i as f64, elem]);
-                                inner.insert(params[0].clone(), tup);
-                            } else if params.len() == 2 {
-                                // Two params: destructure (i, x)
-                                inner.insert(params[0].clone(), Value::Scalar(i as f64));
-                                inner.insert(params[1].clone(), Value::Scalar(elem));
-                            } else {
-                                return Err(lalrpop_util::ParseError::User {
-                                    error: "Filter lambda must have 1 or 2 parameters",
-                                });
+                            for (p, v) in params.iter().zip(bindings) {
+                                inner.insert(p.clone(), v);
                             }
                             let res = crate::expr::TopExprParser::new()
                                 .parse(&inner, body)
@@ -110,23 +103,16 @@ Postfix: Value = {
                         let count = data.len() / width;
                         let mut result_data = Vec::new();
                         for i in 0..count {
-                            // Build flattened tuple (i, elem0, elem1, ...) for lambda
-                            let mut inner = vars.clone();
+                            // Build flattened tuple (i, elem0, elem1, ...) for lambda with decomposition
                             let mut tuple_elems = vec![i as f64];
                             for j in 0..*width {
                                 tuple_elems.push(data[i * width + j]);
                             }
-                            if params.len() == 1 {
-                                inner.insert(params[0].clone(), Value::Tuple(tuple_elems));
-                            } else if params.len() == width + 1 {
-                                // Params: (i, x0, x1, ...) destructured
-                                for (pi, p) in params.iter().enumerate() {
-                                    inner.insert(p.clone(), Value::Scalar(tuple_elems[pi]));
-                                }
-                            } else {
-                                return Err(lalrpop_util::ParseError::User {
-                                    error: "Filter lambda params must match (index, ...tuple_elements)",
-                                });
+                            let bindings = Value::decompose_elements(&tuple_elems, params.len())
+                                .map_err(|e| lalrpop_util::ParseError::User { error: e })?;
+                            let mut inner = vars.clone();
+                            for (p, v) in params.iter().zip(bindings) {
+                                inner.insert(p.clone(), v);
                             }
                             let res = crate::expr::TopExprParser::new()
                                 .parse(&inner, body)
@@ -261,34 +247,29 @@ Atom: Value = {
                             .parse(&inner, body)
                             .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })
                     } else {
-                        // Multi-param lambda: expects Tuple or TupleArray
+                        // Multi-param lambda: expects Tuple or TupleArray, uses decomposition
                         match arg {
                             Value::Tuple(ref t) => {
-                                if t.len() != params.len() {
-                                    return Err(lalrpop_util::ParseError::User {
-                                        error: "Tuple length doesn't match lambda parameters",
-                                    });
-                                }
+                                let bindings = Value::decompose_elements(t, params.len())
+                                    .map_err(|e| lalrpop_util::ParseError::User { error: e })?;
                                 let mut inner = vars.clone();
-                                for (p, v) in params.iter().zip(t.iter()) {
-                                    inner.insert(p.clone(), Value::Scalar(*v));
+                                for (p, v) in params.iter().zip(bindings) {
+                                    inner.insert(p.clone(), v);
                                 }
                                 crate::expr::TopExprParser::new()
                                     .parse(&inner, body)
                                     .map_err(|_| lalrpop_util::ParseError::User { error: "Lambda evaluation failed" })
                             }
                             Value::TupleArray { width, ref data } => {
-                                if width != params.len() {
-                                    return Err(lalrpop_util::ParseError::User {
-                                        error: "Tuple width doesn't match lambda parameters",
-                                    });
-                                }
                                 let count = data.len() / width;
                                 let mut results = Vec::with_capacity(count);
                                 for i in 0..count {
+                                    let tuple_elems: Vec<f64> = data[i * width..(i + 1) * width].to_vec();
+                                    let bindings = Value::decompose_elements(&tuple_elems, params.len())
+                                        .map_err(|e| lalrpop_util::ParseError::User { error: e })?;
                                     let mut inner = vars.clone();
-                                    for (j, p) in params.iter().enumerate() {
-                                        inner.insert(p.clone(), Value::Scalar(data[i * width + j]));
+                                    for (p, v) in params.iter().zip(bindings) {
+                                        inner.insert(p.clone(), v);
                                     }
                                     let res = crate::expr::TopExprParser::new()
                                         .parse(&inner, body)

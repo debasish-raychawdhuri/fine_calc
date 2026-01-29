@@ -172,18 +172,7 @@ impl Value {
     pub fn decompose_tuple(&self, n: usize) -> Result<Vec<Value>, &'static str> {
         match self {
             Value::Tuple(t) => {
-                if t.len() < n {
-                    return Err("Not enough elements in tuple for destructuring");
-                }
-                let mut result = Vec::with_capacity(n);
-                // First n-1 variables get one element each
-                for i in 0..n - 1 {
-                    result.push(Value::Scalar(t[i]));
-                }
-                // Last variable gets the rest
-                let rest: Vec<f64> = t[n - 1..].to_vec();
-                result.push(Self::tuple_or_scalar(rest));
-                Ok(result)
+                Self::decompose_elements(t, n)
             }
             Value::Scalar(v) => {
                 if n == 1 {
@@ -194,6 +183,23 @@ impl Value {
             }
             _ => Err("Can only destructure tuples"),
         }
+    }
+
+    /// Decompose a slice of elements into n values with tuple decomposition semantics.
+    /// First n-1 values get one element each, last value gets the rest.
+    pub fn decompose_elements(elements: &[f64], n: usize) -> Result<Vec<Value>, &'static str> {
+        if elements.len() < n {
+            return Err("Not enough elements for destructuring");
+        }
+        let mut result = Vec::with_capacity(n);
+        // First n-1 variables get one element each
+        for i in 0..n - 1 {
+            result.push(Value::Scalar(elements[i]));
+        }
+        // Last variable gets the rest
+        let rest: Vec<f64> = elements[n - 1..].to_vec();
+        result.push(Self::tuple_or_scalar(rest));
+        Ok(result)
     }
 
     fn broadcast_op(self, other: Value, f: fn(f64, f64) -> f64) -> Result<Value, &'static str> {

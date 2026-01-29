@@ -1004,4 +1004,90 @@ mod tests {
         assert_eq!(parse_tuple_pattern("a, b"), None); // no parens
         assert_eq!(parse_tuple_pattern("(1, 2)"), None); // numbers not idents
     }
+
+    // Lambda decomposition tests
+
+    #[test]
+    fn lambda_decomposition_call() {
+        // f((1, 2, 3)) with (|(a, rest)| ...) should bind a=1, rest=(2,3)
+        let mut vars = HashMap::new();
+        let lam = eval("(|(a, rest)| a)").unwrap();
+        vars.insert("first".to_string(), lam);
+        let result = eval_with("first((1, 2, 3))", &vars).unwrap();
+        assert!(approx(scalar(&result), 1.0));
+    }
+
+    #[test]
+    fn lambda_decomposition_rest_is_tuple() {
+        // Access rest as tuple - rest should be (2, 3)
+        let mut vars = HashMap::new();
+        let lam = eval("(|(a, rest)| rest)").unwrap();
+        vars.insert("tail".to_string(), lam);
+        let result = eval_with("tail((1, 2, 3))", &vars).unwrap();
+        assert!(approx_arr(&tuple(&result), &[2.0, 3.0]));
+    }
+
+    #[test]
+    fn lambda_decomposition_exact_match() {
+        // (|(a, b)| a+b) with (1, 2) - exact match, b gets scalar
+        let mut vars = HashMap::new();
+        let lam = eval("(|(a, b)| a + b)").unwrap();
+        vars.insert("add".to_string(), lam);
+        let result = eval_with("add((1, 2))", &vars).unwrap();
+        assert!(approx(scalar(&result), 3.0));
+    }
+
+    #[test]
+    fn filter_lambda_decomposition() {
+        // TupleArray of width 3, filter with (|(i, rest)| ...)
+        // rest should be the tuple (a, b, c)
+        let mut vars = HashMap::new();
+        let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
+        vars.insert("ta".to_string(), ta);
+        // Filter where index == 0
+        let lam = eval("(|(i, rest)| i == 0)").unwrap();
+        vars.insert("first_only".to_string(), lam);
+        let result = eval_with("ta[first_only]", &vars).unwrap();
+        let (w, d) = tuple_array(&result);
+        assert_eq!(w, 3);
+        assert!(approx_arr(&d, &[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn filter_lambda_decomposition_two_params() {
+        // Array filter with (|(i, x)| ...) - x is the element
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0]));
+        let lam = eval("(|(i, x)| i == 1)").unwrap();
+        vars.insert("second".to_string(), lam);
+        let result = eval_with("arr[second]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[20.0]));
+    }
+
+    #[test]
+    fn tuple_array_lambda_decomposition() {
+        // Map over TupleArray with decomposition
+        // {(1,2,3), (4,5,6)} with (|(a, rest)| a) should give {1, 4}
+        let mut vars = HashMap::new();
+        let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
+        vars.insert("ta".to_string(), ta);
+        let lam = eval("(|(a, rest)| a)").unwrap();
+        vars.insert("first_elem".to_string(), lam);
+        let result = eval_with("first_elem(ta)", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[1.0, 4.0]));
+    }
+
+    #[test]
+    fn filter_three_dim_tuple_array_by_index() {
+        // This is the user's example: x[(|(i,y)| i==0)] on 3D tuple array
+        let mut vars = HashMap::new();
+        let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
+        vars.insert("x".to_string(), ta);
+        let lam = eval("(|(i, y)| i == 0)").unwrap();
+        vars.insert("f".to_string(), lam);
+        let result = eval_with("x[f]", &vars).unwrap();
+        let (w, d) = tuple_array(&result);
+        assert_eq!(w, 3);
+        assert!(approx_arr(&d, &[1.0, 2.0, 3.0])); // First element only
+    }
 }

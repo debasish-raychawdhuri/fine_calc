@@ -71,13 +71,15 @@ CommaSep<T>: Vec<T> = {
 
 Atom: Expr = {
     Num,
-    // Lambda: |x|(body)
+    // Lambda: |x|(body) - single param
     "|" <p:Ident> "|" "(" <body:TopExpr> ")" => {
         Expr::Lambda { params: vec![p.to_string()], body: Box::new(body) }
     },
-    // Lambda: |(x,y)|(body)
-    "|" "(" <params:Comma<Ident>> ")" "|" "(" <body:TopExpr> ")" => {
-        Expr::Lambda { params: params.iter().map(|s| s.to_string()).collect(), body: Box::new(body) }
+    // Lambda: |x,y|(body) - multi param (2+)
+    "|" <first:Ident> "," <rest:Comma<Ident>> "|" "(" <body:TopExpr> ")" => {
+        let mut params = vec![first.to_string()];
+        params.extend(rest.iter().map(|s| s.to_string()));
+        Expr::Lambda { params, body: Box::new(body) }
     },
     // Tuple literal: (a, b) or (a, b, c, ...)
     "(" <first:TopExpr> "," <rest:Comma<TopExpr>> ")" => {

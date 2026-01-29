@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn lambda_multi_param_parse() {
-        let v = eval("|(x,y)|(x+y)").unwrap();
+        let v = eval("|x,y|(x+y)").unwrap();
         match v {
             Value::Lambda { params, .. } => {
                 assert_eq!(params, vec!["x", "y"]);
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     fn lambda_multi_param_call() {
         let mut vars = HashMap::new();
-        let lam = eval("|(x,y)|(x+y)").unwrap();
+        let lam = eval("|x,y|(x+y)").unwrap();
         vars.insert("add".to_string(), lam);
         let result = eval_with("add((3, 4))", &vars).unwrap();
         assert!(approx(scalar(&result), 7.0));
@@ -718,7 +718,7 @@ mod tests {
     #[test]
     fn lambda_multi_param_call_product() {
         let mut vars = HashMap::new();
-        let lam = eval("|(a,b)|(a*b)").unwrap();
+        let lam = eval("|a,b|(a*b)").unwrap();
         vars.insert("mul".to_string(), lam);
         let result = eval_with("mul((5, 6))", &vars).unwrap();
         assert!(approx(scalar(&result), 30.0));
@@ -727,7 +727,7 @@ mod tests {
     #[test]
     fn lambda_over_tuple_array() {
         let mut vars = HashMap::new();
-        let lam = eval("|(x,y)|(x+y)").unwrap();
+        let lam = eval("|x,y|(x+y)").unwrap();
         vars.insert("add".to_string(), lam);
         // add applied to {(1,2), (3,4), (5,6)} should return {3, 7, 11}
         let result = eval_with("add({(1,2), (3,4), (5,6)})", &vars).unwrap();
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn lambda_over_tuple_array_broadcast() {
         let mut vars = HashMap::new();
-        let lam = eval("|(x,y)|(x*y)").unwrap();
+        let lam = eval("|x,y|(x*y)").unwrap();
         vars.insert("mul".to_string(), lam);
         // mul applied to (2, {1,2,3}) => TupleArray {(2,1), (2,2), (2,3)} => {2, 4, 6}
         let result = eval_with("mul((2, {1, 2, 3}))", &vars).unwrap();
@@ -764,8 +764,8 @@ mod tests {
 
     #[test]
     fn lambda_multi_display() {
-        let v = eval("|(a,b)|(a+b)").unwrap();
-        assert_eq!(format!("{}", v), "|(a, b)|((a + b))");
+        let v = eval("|a,b|(a+b)").unwrap();
+        assert_eq!(format!("{}", v), "|a, b|((a + b))");
     }
 
     #[test]
@@ -785,7 +785,7 @@ mod tests {
     #[test]
     fn lambda_wrong_tuple_length_error() {
         let mut vars = HashMap::new();
-        let lam = eval("|(x,y)|(x+y)").unwrap();
+        let lam = eval("|x,y|(x+y)").unwrap();
         vars.insert("f".to_string(), lam);
         // Calling with wrong tuple length should error
         let result = eval_with("f((1, 2, 3))", &vars);
@@ -795,7 +795,7 @@ mod tests {
     #[test]
     fn three_param_lambda() {
         let mut vars = HashMap::new();
-        let lam = eval("|(a,b,c)|(a+b+c)").unwrap();
+        let lam = eval("|a,b,c|(a+b+c)").unwrap();
         vars.insert("sum3".to_string(), lam);
         let result = eval_with("sum3((1, 2, 3))", &vars).unwrap();
         assert!(approx(scalar(&result), 6.0));
@@ -882,8 +882,8 @@ mod tests {
     fn array_filter_lambda_two_params() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0, 4.0, 5.0]));
-        // Filter elements > 2: arr[pred] where pred = |(i,x)|(x > 2)
-        let lam = eval("|(i,x)|(x > 2)").unwrap();
+        // Filter elements > 2: arr[pred] where pred = |i,x|(x > 2)
+        let lam = eval("|i,x|(x > 2)").unwrap();
         vars.insert("pred".to_string(), lam);
         let result = eval_with("arr[pred]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[3.0, 4.0, 5.0]));
@@ -895,7 +895,7 @@ mod tests {
         vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
         // Filter even indices: i % 2 == 0
         // We can use floor(i/2)*2 == i to check evenness
-        let lam = eval("|(i,x)|(floor(i/2)*2 == i)").unwrap();
+        let lam = eval("|i,x|(floor(i/2)*2 == i)").unwrap();
         vars.insert("even_idx".to_string(), lam);
         let result = eval_with("arr[even_idx]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[10.0, 30.0, 50.0]));
@@ -905,7 +905,7 @@ mod tests {
     fn array_filter_positive() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![-2.0, -1.0, 0.0, 1.0, 2.0]));
-        let lam = eval("|(i,x)|(x > 0)").unwrap();
+        let lam = eval("|i,x|(x > 0)").unwrap();
         vars.insert("pos".to_string(), lam);
         let result = eval_with("arr[pos]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[1.0, 2.0]));
@@ -915,7 +915,7 @@ mod tests {
     fn array_filter_empty_result() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
-        let lam = eval("|(i,x)|(x > 100)").unwrap();
+        let lam = eval("|i,x|(x > 100)").unwrap();
         vars.insert("never".to_string(), lam);
         let result = eval_with("arr[never]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[]));
@@ -925,7 +925,7 @@ mod tests {
     fn array_filter_all_pass() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
-        let lam = eval("|(i,x)|(1)").unwrap();
+        let lam = eval("|i,x|(1)").unwrap();
         vars.insert("always".to_string(), lam);
         let result = eval_with("arr[always]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[1.0, 2.0, 3.0]));
@@ -933,9 +933,9 @@ mod tests {
 
     #[test]
     fn range_then_filter() {
-        // [10][gt5] where gt5 = |(i,x)|(x > 5) should give {6, 7, 8, 9}
+        // [10][gt5] where gt5 = |i,x|(x > 5) should give {6, 7, 8, 9}
         let mut vars = HashMap::new();
-        let lam = eval("|(i,x)|(x > 5)").unwrap();
+        let lam = eval("|i,x|(x > 5)").unwrap();
         vars.insert("gt5".to_string(), lam);
         let result = eval_with("[10][gt5]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[6.0, 7.0, 8.0, 9.0]));
@@ -961,7 +961,7 @@ mod tests {
         let ta = Value::TupleArray { width: 2, data: vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0] };
         vars.insert("ta".to_string(), ta);
         // Filter: keep tuples where x > 1 (x is the first element of the tuple)
-        let lam = eval("|(i,x,y)|(x > 1)").unwrap();
+        let lam = eval("|i,x,y|(x > 1)").unwrap();
         vars.insert("f".to_string(), lam);
         let result = eval_with("ta[f]", &vars).unwrap();
         let (w, d) = tuple_array(&result);
@@ -974,7 +974,7 @@ mod tests {
         // Test chained indexing: create array, then filter, then index
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
-        let lam = eval("|(i,x)|(x > 20)").unwrap();
+        let lam = eval("|i,x|(x > 20)").unwrap();
         vars.insert("gt20".to_string(), lam);
         // arr[gt20][0] should give 30
         let result = eval_with("arr[gt20][0]", &vars).unwrap();
@@ -987,7 +987,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
         // A tiny value below the 1e-10 threshold should be falsy
-        let lam = eval("|(i,x)|(0.00000000001)").unwrap(); // 1e-11, below threshold
+        let lam = eval("|i,x|(0.00000000001)").unwrap(); // 1e-11, below threshold
         vars.insert("tiny".to_string(), lam);
         let result = eval_with("arr[tiny]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[])); // All filtered out
@@ -1012,9 +1012,9 @@ mod tests {
 
     #[test]
     fn lambda_decomposition_call() {
-        // f((1, 2, 3)) with |(a, rest)|(a) should bind a=1, rest=(2,3)
+        // f((1, 2, 3)) with |a, rest|(a) should bind a=1, rest=(2,3)
         let mut vars = HashMap::new();
-        let lam = eval("|(a, rest)|(a)").unwrap();
+        let lam = eval("|a, rest|(a)").unwrap();
         vars.insert("first".to_string(), lam);
         let result = eval_with("first((1, 2, 3))", &vars).unwrap();
         assert!(approx(scalar(&result), 1.0));
@@ -1024,7 +1024,7 @@ mod tests {
     fn lambda_decomposition_rest_is_tuple() {
         // Access rest as tuple - rest should be (2, 3)
         let mut vars = HashMap::new();
-        let lam = eval("|(a, rest)|(rest)").unwrap();
+        let lam = eval("|a, rest|(rest)").unwrap();
         vars.insert("tail".to_string(), lam);
         let result = eval_with("tail((1, 2, 3))", &vars).unwrap();
         assert!(approx_arr(&tuple(&result), &[2.0, 3.0]));
@@ -1032,9 +1032,9 @@ mod tests {
 
     #[test]
     fn lambda_decomposition_exact_match() {
-        // |(a, b)|(a+b) with (1, 2) - exact match, b gets scalar
+        // |a, b|(a+b) with (1, 2) - exact match, b gets scalar
         let mut vars = HashMap::new();
-        let lam = eval("|(a, b)|(a + b)").unwrap();
+        let lam = eval("|a, b|(a + b)").unwrap();
         vars.insert("add".to_string(), lam);
         let result = eval_with("add((1, 2))", &vars).unwrap();
         assert!(approx(scalar(&result), 3.0));
@@ -1042,13 +1042,13 @@ mod tests {
 
     #[test]
     fn filter_lambda_decomposition() {
-        // TupleArray of width 3, filter with |(i, rest)|(...)
+        // TupleArray of width 3, filter with |i, rest|(...)
         // rest should be the tuple (a, b, c)
         let mut vars = HashMap::new();
         let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
         vars.insert("ta".to_string(), ta);
         // Filter where index == 0
-        let lam = eval("|(i, rest)|(i == 0)").unwrap();
+        let lam = eval("|i, rest|(i == 0)").unwrap();
         vars.insert("first_only".to_string(), lam);
         let result = eval_with("ta[first_only]", &vars).unwrap();
         let (w, d) = tuple_array(&result);
@@ -1058,10 +1058,10 @@ mod tests {
 
     #[test]
     fn filter_lambda_decomposition_two_params() {
-        // Array filter with |(i, x)|(i == 1) - x is the element
+        // Array filter with |i, x|(i == 1) - x is the element
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0]));
-        let lam = eval("|(i, x)|(i == 1)").unwrap();
+        let lam = eval("|i, x|(i == 1)").unwrap();
         vars.insert("second".to_string(), lam);
         let result = eval_with("arr[second]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[20.0]));
@@ -1070,11 +1070,11 @@ mod tests {
     #[test]
     fn tuple_array_lambda_decomposition() {
         // Map over TupleArray with decomposition
-        // {(1,2,3), (4,5,6)} with |(a, rest)|(a) should give {1, 4}
+        // {(1,2,3), (4,5,6)} with |a, rest|(a) should give {1, 4}
         let mut vars = HashMap::new();
         let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
         vars.insert("ta".to_string(), ta);
-        let lam = eval("|(a, rest)|(a)").unwrap();
+        let lam = eval("|a, rest|(a)").unwrap();
         vars.insert("first_elem".to_string(), lam);
         let result = eval_with("first_elem(ta)", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[1.0, 4.0]));
@@ -1082,11 +1082,11 @@ mod tests {
 
     #[test]
     fn filter_three_dim_tuple_array_by_index() {
-        // This is the user's example: x[|(i,y)|(i==0)] on 3D tuple array
+        // This is the user's example: x[|i,y|(i==0)] on 3D tuple array
         let mut vars = HashMap::new();
         let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
         vars.insert("x".to_string(), ta);
-        let lam = eval("|(i, y)|(i == 0)").unwrap();
+        let lam = eval("|i, y|(i == 0)").unwrap();
         vars.insert("f".to_string(), lam);
         let result = eval_with("x[f]", &vars).unwrap();
         let (w, d) = tuple_array(&result);
@@ -1203,7 +1203,7 @@ mod tests {
     fn tensor_product_with_lambda() {
         // Create tensor product, then apply lambda
         let mut vars = HashMap::new();
-        let lam = eval("|(x, y)|(x + y)").unwrap();
+        let lam = eval("|x, y|(x + y)").unwrap();
         vars.insert("add".to_string(), lam);
         // {1, 2} ** {10, 20} = {(1,10), (1,20), (2,10), (2,20)}
         // add on that = {11, 21, 12, 22}
@@ -1265,14 +1265,14 @@ mod tests {
     #[test]
     fn inline_lambda_multi_param() {
         // Multi-param lambda inline
-        let v = eval("{1, 2, 3, 4, 5}[|(i,x)|(x > 2)]").unwrap();
+        let v = eval("{1, 2, 3, 4, 5}[|i,x|(x > 2)]").unwrap();
         assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
     }
 
     #[test]
     fn inline_lambda_tensor_filter() {
-        // The user's example: ([10]**[10])[|(i,x,y)|(x*y > 10)]
-        let v = eval("([3]**[3])[|(i,x,y)|(x*y > 1)]").unwrap();
+        // The user's example: ([10]**[10])[|i,x,y|(x*y > 10)]
+        let v = eval("([3]**[3])[|i,x,y|(x*y > 1)]").unwrap();
         // 3x3 = pairs (0,0)..(2,2), filter where x*y > 1
         // (1,2), (2,1), (2,2) have products 2, 2, 4 > 1
         let (w, d) = tuple_array(&v);
@@ -1295,7 +1295,7 @@ mod tests {
     #[test]
     fn user_example_tensor_filter() {
         // The exact example the user asked about (with new syntax)
-        let v = eval("([10]**[10])[|(i,x,y)|(x*y>10)]").unwrap();
+        let v = eval("([10]**[10])[|i,x,y|(x*y>10)]").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
         assert!(d.len() > 0);
@@ -1307,14 +1307,14 @@ mod tests {
     #[test]
     fn lambda_filter() {
         // |x|(body) syntax in filter
-        let v = eval("{1, 2, 3, 4, 5}[|(i,x)|(x > 2)]").unwrap();
+        let v = eval("{1, 2, 3, 4, 5}[|i,x|(x > 2)]").unwrap();
         assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
     }
 
     #[test]
     fn lambda_tensor_filter() {
         // Lambda filter on tensor product
-        let v = eval("([10]**[10])[|(i,x,y)|(x*y>10)]").unwrap();
+        let v = eval("([10]**[10])[|i,x,y|(x*y>10)]").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
         assert!(d.len() > 0);
@@ -1338,7 +1338,7 @@ mod tests {
     #[test]
     fn lambda_multi_param() {
         // Multi-param lambda
-        let v = eval("|(x,y)|(x + y)").unwrap();
+        let v = eval("|x,y|(x + y)").unwrap();
         match v {
             Value::Lambda { params, .. } => {
                 assert_eq!(params, vec!["x", "y"]);
@@ -1401,14 +1401,14 @@ mod tests {
     #[test]
     fn ast_lambda_inline_in_filter() {
         // Inline lambda directly in filter expression (needs i,x pattern)
-        let v = eval("{1, 2, 3, 4, 5}[|(i,x)|(x > 3)]").unwrap();
+        let v = eval("{1, 2, 3, 4, 5}[|i,x|(x > 3)]").unwrap();
         assert!(approx_arr(&array(&v), &[4.0, 5.0]));
     }
 
     #[test]
     fn ast_lambda_inline_multi_param_filter() {
         // Inline multi-param lambda in filter
-        let v = eval("{10, 20, 30}[|(i,x)|(i == 1)]").unwrap();
+        let v = eval("{10, 20, 30}[|i,x|(i == 1)]").unwrap();
         assert!(approx_arr(&array(&v), &[20.0]));
     }
 
@@ -1445,7 +1445,7 @@ mod tests {
     #[test]
     fn ast_tensor_product_filter_inline() {
         // The original user example with new syntax
-        let v = eval("([5]**[5])[|(i,x,y)|(x*y > 6)]").unwrap();
+        let v = eval("([5]**[5])[|i,x,y|(x*y > 6)]").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
         // All pairs where product > 6: (2,4), (3,3), (3,4), (4,2), (4,3), (4,4)
@@ -1478,7 +1478,7 @@ mod tests {
     fn ast_lambda_tuple_sum() {
         // Multi-param lambda summing tuple elements
         let mut vars = HashMap::new();
-        let lam = eval("|(a,b,c)|(a + b + c)").unwrap();
+        let lam = eval("|a,b,c|(a + b + c)").unwrap();
         vars.insert("sum3".to_string(), lam);
         let result = eval_with("sum3((10, 20, 30))", &vars).unwrap();
         assert!(approx(scalar(&result), 60.0));
@@ -1488,7 +1488,7 @@ mod tests {
     fn ast_lambda_tuple_product() {
         // Multi-param lambda multiplying tuple elements
         let mut vars = HashMap::new();
-        let lam = eval("|(x,y)|(x * y)").unwrap();
+        let lam = eval("|x,y|(x * y)").unwrap();
         vars.insert("prod".to_string(), lam);
         let result = eval_with("prod((7, 8))", &vars).unwrap();
         assert!(approx(scalar(&result), 56.0));
@@ -1497,7 +1497,7 @@ mod tests {
     #[test]
     fn ast_lambda_complex_filter_condition() {
         // Complex filter: keep elements where (i + x) is even
-        let v = eval("{10, 11, 12, 13, 14}[|(i,x)|(floor((i+x)/2)*2 == i+x)]").unwrap();
+        let v = eval("{10, 11, 12, 13, 14}[|i,x|(floor((i+x)/2)*2 == i+x)]").unwrap();
         // i=0,x=10: 10 even -> keep
         // i=1,x=11: 12 even -> keep
         // i=2,x=12: 14 even -> keep

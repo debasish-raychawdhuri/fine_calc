@@ -20,8 +20,8 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Tuple arrays: `{(1,2), (3,4)}` or broadcasting `(scalar, array)` creates arrays of tuples
 - Tuple decomposition: `(a, b) = (1, 2, 3)` assigns `a=1`, `b=(2,3)` (last var gets rest)
 - Array indexing: `arr[i]` returns element at index; `arr[lambda]` filters with `(index, value...)` predicate
-- Lambdas: define with `(|x| expr)` or multi-param `(|(x,y)| expr)`, call with `name(arg)`
-- Lambda decomposition: `(|(a, rest)| ...)` binds first element to `a`, remaining to `rest` as tuple
+- Lambdas: define with `|x|(expr)` or multi-param `|(x,y)|(expr)`, call with `name(arg)`
+- Lambda decomposition: `|(a, rest)|(...)` binds first element to `a`, remaining to `rest` as tuple
 - Tensor product: `x ** y` creates Cartesian product of arrays with flattened tuples
 
 ## Keybindings
@@ -110,14 +110,14 @@ fine_calc
 1
 >> 3 > 2 && 1 == 1
 1
->> sq = (|x| x*x)
-(|x| x*x)
+>> sq = |x|(x*x)
+|x|((x * x))
 >> sq(3)
 9
 >> sq({1, 2, 4})
 {1, 4, 16}
->> inc = (|x| x+1)
-(|x| x+1)
+>> inc = |x|(x+1)
+|x|((x + 1))
 >> inc(10)
 11
 >> (1, 2, 3)
@@ -128,50 +128,50 @@ fine_calc
 {(1, 2), (3, 4), (5, 6)}
 >> (10, {1, 2, 3})
 {(10, 1), (10, 2), (10, 3)}
->> add = (|(x,y)| x+y)
-(|(x,y)| x+y)
+>> add = |(x,y)|(x+y)
+|(x, y)|((x + y))
 >> add((3, 4))
 7
 >> add({(1, 2), (3, 4), (5, 6)})
 {3, 7, 11}
->> mul = (|(a,b)| a*b)
-(|(a,b)| a*b)
+>> mul = |(a,b)|(a*b)
+|(a, b)|((a * b))
 >> mul((2, {1, 2, 3}))
 {2, 4, 6}
 >> arr = {10, 20, 30, 40, 50}
 {10, 20, 30, 40, 50}
 >> arr[2]
 30
->> gt20 = (|(i,x)| x > 20)
-(|(i,x)| x > 20)
+>> gt20 = |(i,x)|(x > 20)
+|(i, x)|((x > 20))
 >> arr[gt20]
 {30, 40, 50}
 >> [10][gt20]
 {6, 7, 8, 9}
->> evenIdx = (|(i,x)| floor(i/2)*2 == i)
-(|(i,x)| floor(i/2)*2 == i)
+>> evenIdx = |(i,x)|(floor(i/2)*2 == i)
+|(i, x)|(((floor(i) / 2) * 2) == i))
 >> arr[evenIdx]
 {10, 30, 50}
 >> ta = {(1, 10), (2, 20), (3, 30)}
 {(1, 10), (2, 20), (3, 30)}
 >> ta[0]
 (1, 10)
->> first_gt_1 = (|(i,x,y)| x > 1)
-(|(i,x,y)| x > 1)
+>> first_gt_1 = |(i,x,y)|(x > 1)
+|(i, x, y)|((x > 1))
 >> ta[first_gt_1]
 {(2, 20), (3, 30)}
 >> tri = {(1, 2, 3), (4, 5, 6), (7, 8, 9)}
 {(1, 2, 3), (4, 5, 6), (7, 8, 9)}
->> getFirst = (|(a, rest)| a)
-(|(a,rest)| a)
+>> getFirst = |(a, rest)|(a)
+|(a, rest)|(a)
 >> getFirst({(1, 2, 3), (4, 5, 6)})
 {1, 4}
->> getRest = (|(a, rest)| rest)
-(|(a,rest)| rest)
+>> getRest = |(a, rest)|(rest)
+|(a, rest)|(rest)
 >> getRest((1, 2, 3))
 (2, 3)
->> firstGt3 = (|(i, first, rest)| first > 3)
-(|(i,first,rest)| first > 3)
+>> firstGt3 = |(i, first, rest)|(first > 3)
+|(i, first, rest)|((first > 3))
 >> tri[firstGt3]
 {(4, 5, 6), (7, 8, 9)}
 >> {1, 2} ** {10, 20, 30}
@@ -180,8 +180,8 @@ fine_calc
 {(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)}
 >> (1, 2) ** (3, 4)
 (1, 2, 3, 4)
->> add = (|(x, y)| x + y)
-(|(x,y)| x+y)
+>> add = |(x, y)|(x + y)
+|(x, y)|((x + y))
 >> add({1, 2} ** {10, 20})
 {11, 21, 12, 22}
 ```

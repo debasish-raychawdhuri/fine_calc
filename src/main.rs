@@ -1,153 +1,14 @@
 use ncurses::*;
 use std::collections::HashMap;
 
+mod ast;
 mod value;
+mod eval;
+
 use value::Value;
+use eval::eval;
 
 lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
-
-/// Check if a string is a valid identifier
-fn is_valid_param(s: &str) -> bool {
-    !s.is_empty()
-        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
-        && (s.starts_with('_') || s.chars().next().unwrap().is_alphabetic())
-}
-
-/// Parse parameter list from a string like "x" or "(x,y,z)"
-fn parse_params(param_part: &str) -> Option<Vec<String>> {
-    let param_part = param_part.trim();
-    if param_part.starts_with('(') && param_part.ends_with(')') {
-        // Multi-param: (x,y,z)
-        let params_str = &param_part[1..param_part.len() - 1];
-        let params: Vec<String> = params_str
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .collect();
-        if params.iter().all(|p| is_valid_param(p)) && !params.is_empty() {
-            Some(params)
-        } else {
-            None
-        }
-    } else {
-        // Single param: x
-        if is_valid_param(param_part) {
-            Some(vec![param_part.to_string()])
-        } else {
-            None
-        }
-    }
-}
-
-/// Try to parse a lambda literal from a string starting at position `start`.
-/// Supports both `(|x| body)` and `|x| body` syntax.
-/// Returns Some((Lambda, end_position)) if successful, None otherwise.
-fn parse_lambda_at(s: &str, start: usize) -> Option<(Value, usize)> {
-    let rest = &s[start..];
-
-    // Check for both syntaxes: (|...| or |...|
-    let (has_outer_paren, inner_start) = if rest.starts_with("(|") {
-        (true, start + 2)
-    } else if rest.starts_with('|') {
-        (false, start + 1)
-    } else {
-        return None;
-    };
-
-    let inner = &s[inner_start..];
-
-    // Find the second | that ends params
-    let pipe_pos = inner.find('|')?;
-    let param_part = &inner[..pipe_pos];
-    let params = parse_params(param_part)?;
-
-    // Find end of body
-    let body_start = inner_start + pipe_pos + 1;
-    let mut depth: i32 = if has_outer_paren { 1 } else { 0 };
-    let mut bracket_depth: i32 = 0;
-    let mut brace_depth: i32 = 0;
-    let mut end_pos = s.len();
-
-    for (i, c) in s[body_start..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
-                if depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                    // End of lambda (unmatched ) means we're done)
-                    end_pos = body_start + i;
-                    break;
-                }
-                depth = depth.saturating_sub(1);
-                if has_outer_paren && depth == 0 && bracket_depth == 0 && brace_depth == 0 {
-                    end_pos = body_start + i;
-                    break;
-                }
-            }
-            '[' => bracket_depth += 1,
-            ']' => {
-                if bracket_depth == 0 && depth == 0 && brace_depth == 0 {
-                    // End of filter lambda
-                    end_pos = body_start + i;
-                    break;
-                }
-                bracket_depth = bracket_depth.saturating_sub(1);
-            }
-            '{' => brace_depth += 1,
-            '}' => {
-                brace_depth = brace_depth.saturating_sub(1);
-            }
-            ',' => {
-                if depth == 0 && bracket_depth == 0 && brace_depth == 0 && !has_outer_paren {
-                    // End of lambda in a list context
-                    end_pos = body_start + i;
-                    break;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    let body = s[body_start..end_pos].trim();
-    if body.is_empty() {
-        return None;
-    }
-
-    // For (|x| body) syntax, consume the closing )
-    let final_end = if has_outer_paren { end_pos + 1 } else { end_pos };
-
-    Some((Value::Lambda { params, body: body.to_string() }, final_end))
-}
-
-/// Extract all lambda literals from input, replacing them with placeholder variables.
-/// Returns (modified_input, map of placeholder -> Lambda).
-fn extract_lambdas(input: &str) -> (String, HashMap<String, Value>) {
-    let mut result = String::new();
-    let mut lambdas = HashMap::new();
-    let mut i = 0;
-    let mut lambda_count = 0;
-
-    while i < input.len() {
-        // Check for lambda syntax: (|...| or |...|
-        // But avoid matching || (logical or)
-        let rest = &input[i..];
-        let is_lambda_start = rest.starts_with("(|")
-            || (rest.starts_with('|') && !rest.starts_with("||") && rest.len() > 1);
-
-        if is_lambda_start {
-            if let Some((lambda, end)) = parse_lambda_at(input, i) {
-                let placeholder = format!("__lambda{}__", lambda_count);
-                lambda_count += 1;
-                lambdas.insert(placeholder.clone(), lambda);
-                result.push_str(&placeholder);
-                i = end;
-                continue;
-            }
-        }
-        result.push(input[i..].chars().next().unwrap());
-        i += input[i..].chars().next().unwrap().len_utf8();
-    }
-
-    (result, lambdas)
-}
 
 fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Value, String> {
     let input = input.trim();
@@ -155,21 +16,13 @@ fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Val
         return Err("Empty expression".to_string());
     }
 
-    // Extract inline lambdas and replace with placeholders
-    let (processed_input, extracted_lambdas) = extract_lambdas(input);
+    // Parse to AST
+    let ast = expr::TopExprParser::new()
+        .parse(input)
+        .map_err(|e| format!("{}", e))?;
 
-    // Merge extracted lambdas with existing vars
-    let mut merged_vars = vars.clone();
-    for (name, lambda) in extracted_lambdas {
-        merged_vars.insert(name, lambda);
-    }
-
-    expr::TopExprParser::new()
-        .parse(&merged_vars, &processed_input)
-        .map_err(|e| match e {
-            lalrpop_util::ParseError::User { error } => error.to_string(),
-            other => format!("{}", other),
-        })
+    // Evaluate AST
+    eval(&ast, vars)
 }
 
 /// Check if identifier is valid
@@ -751,7 +604,7 @@ mod tests {
     #[test]
     fn lambda_define_and_call() {
         let mut vars = HashMap::new();
-        let lam = Value::Lambda { params: vec!["x".to_string()], body: "x*x".to_string() };
+        let lam = eval("|x|(x*x)").unwrap();
         vars.insert("sq".to_string(), lam);
         assert!(approx(scalar(&evaluate_expression("sq(3)", &vars).unwrap()), 9.0));
     }
@@ -759,7 +612,7 @@ mod tests {
     #[test]
     fn lambda_call_with_array() {
         let mut vars = HashMap::new();
-        let lam = Value::Lambda { params: vec!["x".to_string()], body: "x*x".to_string() };
+        let lam = eval("|x|(x*x)").unwrap();
         vars.insert("sq".to_string(), lam);
         let v = evaluate_expression("sq({1,2,4})", &vars).unwrap();
         assert!(approx_arr(&array(&v), &[1.0, 4.0, 16.0]));
@@ -768,7 +621,7 @@ mod tests {
     #[test]
     fn lambda_literal_parse() {
         let mut vars = HashMap::new();
-        let lam = evaluate_expression("(|x| x+1)", &vars).unwrap();
+        let lam = evaluate_expression("|x|(x+1)", &vars).unwrap();
         vars.insert("inc".to_string(), lam);
         assert!(approx(scalar(&evaluate_expression("inc(5)", &vars).unwrap()), 6.0));
     }
@@ -844,11 +697,10 @@ mod tests {
 
     #[test]
     fn lambda_multi_param_parse() {
-        let v = eval("(|(x,y)| x+y)").unwrap();
+        let v = eval("|(x,y)|(x+y)").unwrap();
         match v {
-            Value::Lambda { params, body } => {
+            Value::Lambda { params, .. } => {
                 assert_eq!(params, vec!["x", "y"]);
-                assert_eq!(body, "x+y");
             }
             _ => panic!("expected lambda"),
         }
@@ -857,7 +709,7 @@ mod tests {
     #[test]
     fn lambda_multi_param_call() {
         let mut vars = HashMap::new();
-        let lam = eval("(|(x,y)| x+y)").unwrap();
+        let lam = eval("|(x,y)|(x+y)").unwrap();
         vars.insert("add".to_string(), lam);
         let result = eval_with("add((3, 4))", &vars).unwrap();
         assert!(approx(scalar(&result), 7.0));
@@ -866,7 +718,7 @@ mod tests {
     #[test]
     fn lambda_multi_param_call_product() {
         let mut vars = HashMap::new();
-        let lam = eval("(|(a,b)| a*b)").unwrap();
+        let lam = eval("|(a,b)|(a*b)").unwrap();
         vars.insert("mul".to_string(), lam);
         let result = eval_with("mul((5, 6))", &vars).unwrap();
         assert!(approx(scalar(&result), 30.0));
@@ -875,7 +727,7 @@ mod tests {
     #[test]
     fn lambda_over_tuple_array() {
         let mut vars = HashMap::new();
-        let lam = eval("(|(x,y)| x+y)").unwrap();
+        let lam = eval("|(x,y)|(x+y)").unwrap();
         vars.insert("add".to_string(), lam);
         // add applied to {(1,2), (3,4), (5,6)} should return {3, 7, 11}
         let result = eval_with("add({(1,2), (3,4), (5,6)})", &vars).unwrap();
@@ -885,7 +737,7 @@ mod tests {
     #[test]
     fn lambda_over_tuple_array_broadcast() {
         let mut vars = HashMap::new();
-        let lam = eval("(|(x,y)| x*y)").unwrap();
+        let lam = eval("|(x,y)|(x*y)").unwrap();
         vars.insert("mul".to_string(), lam);
         // mul applied to (2, {1,2,3}) => TupleArray {(2,1), (2,2), (2,3)} => {2, 4, 6}
         let result = eval_with("mul((2, {1, 2, 3}))", &vars).unwrap();
@@ -906,14 +758,14 @@ mod tests {
 
     #[test]
     fn lambda_single_display() {
-        let v = eval("(|x| x+1)").unwrap();
-        assert_eq!(format!("{}", v), "(|x| x+1)");
+        let v = eval("|x|(x+1)").unwrap();
+        assert_eq!(format!("{}", v), "|x|((x + 1))");
     }
 
     #[test]
     fn lambda_multi_display() {
-        let v = eval("(|(a,b)| a+b)").unwrap();
-        assert_eq!(format!("{}", v), "(|(a,b)| a+b)");
+        let v = eval("|(a,b)|(a+b)").unwrap();
+        assert_eq!(format!("{}", v), "|(a, b)|((a + b))");
     }
 
     #[test]
@@ -933,7 +785,7 @@ mod tests {
     #[test]
     fn lambda_wrong_tuple_length_error() {
         let mut vars = HashMap::new();
-        let lam = eval("(|(x,y)| x+y)").unwrap();
+        let lam = eval("|(x,y)|(x+y)").unwrap();
         vars.insert("f".to_string(), lam);
         // Calling with wrong tuple length should error
         let result = eval_with("f((1, 2, 3))", &vars);
@@ -943,7 +795,7 @@ mod tests {
     #[test]
     fn three_param_lambda() {
         let mut vars = HashMap::new();
-        let lam = eval("(|(a,b,c)| a+b+c)").unwrap();
+        let lam = eval("|(a,b,c)|(a+b+c)").unwrap();
         vars.insert("sum3".to_string(), lam);
         let result = eval_with("sum3((1, 2, 3))", &vars).unwrap();
         assert!(approx(scalar(&result), 6.0));
@@ -1030,8 +882,8 @@ mod tests {
     fn array_filter_lambda_two_params() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0, 4.0, 5.0]));
-        // Filter elements > 2: arr[pred] where pred = (|(i,x)| x > 2)
-        let lam = eval("(|(i,x)| x > 2)").unwrap();
+        // Filter elements > 2: arr[pred] where pred = |(i,x)|(x > 2)
+        let lam = eval("|(i,x)|(x > 2)").unwrap();
         vars.insert("pred".to_string(), lam);
         let result = eval_with("arr[pred]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[3.0, 4.0, 5.0]));
@@ -1043,7 +895,7 @@ mod tests {
         vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
         // Filter even indices: i % 2 == 0
         // We can use floor(i/2)*2 == i to check evenness
-        let lam = eval("(|(i,x)| floor(i/2)*2 == i)").unwrap();
+        let lam = eval("|(i,x)|(floor(i/2)*2 == i)").unwrap();
         vars.insert("even_idx".to_string(), lam);
         let result = eval_with("arr[even_idx]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[10.0, 30.0, 50.0]));
@@ -1053,7 +905,7 @@ mod tests {
     fn array_filter_positive() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![-2.0, -1.0, 0.0, 1.0, 2.0]));
-        let lam = eval("(|(i,x)| x > 0)").unwrap();
+        let lam = eval("|(i,x)|(x > 0)").unwrap();
         vars.insert("pos".to_string(), lam);
         let result = eval_with("arr[pos]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[1.0, 2.0]));
@@ -1063,7 +915,7 @@ mod tests {
     fn array_filter_empty_result() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
-        let lam = eval("(|(i,x)| x > 100)").unwrap();
+        let lam = eval("|(i,x)|(x > 100)").unwrap();
         vars.insert("never".to_string(), lam);
         let result = eval_with("arr[never]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[]));
@@ -1073,7 +925,7 @@ mod tests {
     fn array_filter_all_pass() {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
-        let lam = eval("(|(i,x)| 1)").unwrap();
+        let lam = eval("|(i,x)|(1)").unwrap();
         vars.insert("always".to_string(), lam);
         let result = eval_with("arr[always]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[1.0, 2.0, 3.0]));
@@ -1081,9 +933,9 @@ mod tests {
 
     #[test]
     fn range_then_filter() {
-        // [10][gt5] where gt5 = (|(i,x)| x > 5) should give {6, 7, 8, 9}
+        // [10][gt5] where gt5 = |(i,x)|(x > 5) should give {6, 7, 8, 9}
         let mut vars = HashMap::new();
-        let lam = eval("(|(i,x)| x > 5)").unwrap();
+        let lam = eval("|(i,x)|(x > 5)").unwrap();
         vars.insert("gt5".to_string(), lam);
         let result = eval_with("[10][gt5]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[6.0, 7.0, 8.0, 9.0]));
@@ -1109,7 +961,7 @@ mod tests {
         let ta = Value::TupleArray { width: 2, data: vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0] };
         vars.insert("ta".to_string(), ta);
         // Filter: keep tuples where x > 1 (x is the first element of the tuple)
-        let lam = eval("(|(i,x,y)| x > 1)").unwrap();
+        let lam = eval("|(i,x,y)|(x > 1)").unwrap();
         vars.insert("f".to_string(), lam);
         let result = eval_with("ta[f]", &vars).unwrap();
         let (w, d) = tuple_array(&result);
@@ -1122,7 +974,7 @@ mod tests {
         // Test chained indexing: create array, then filter, then index
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
-        let lam = eval("(|(i,x)| x > 20)").unwrap();
+        let lam = eval("|(i,x)|(x > 20)").unwrap();
         vars.insert("gt20".to_string(), lam);
         // arr[gt20][0] should give 30
         let result = eval_with("arr[gt20][0]", &vars).unwrap();
@@ -1135,7 +987,7 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
         // A tiny value below the 1e-10 threshold should be falsy
-        let lam = eval("(|(i,x)| 0.00000000001)").unwrap(); // 1e-11, below threshold
+        let lam = eval("|(i,x)|(0.00000000001)").unwrap(); // 1e-11, below threshold
         vars.insert("tiny".to_string(), lam);
         let result = eval_with("arr[tiny]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[])); // All filtered out
@@ -1160,9 +1012,9 @@ mod tests {
 
     #[test]
     fn lambda_decomposition_call() {
-        // f((1, 2, 3)) with (|(a, rest)| ...) should bind a=1, rest=(2,3)
+        // f((1, 2, 3)) with |(a, rest)|(a) should bind a=1, rest=(2,3)
         let mut vars = HashMap::new();
-        let lam = eval("(|(a, rest)| a)").unwrap();
+        let lam = eval("|(a, rest)|(a)").unwrap();
         vars.insert("first".to_string(), lam);
         let result = eval_with("first((1, 2, 3))", &vars).unwrap();
         assert!(approx(scalar(&result), 1.0));
@@ -1172,7 +1024,7 @@ mod tests {
     fn lambda_decomposition_rest_is_tuple() {
         // Access rest as tuple - rest should be (2, 3)
         let mut vars = HashMap::new();
-        let lam = eval("(|(a, rest)| rest)").unwrap();
+        let lam = eval("|(a, rest)|(rest)").unwrap();
         vars.insert("tail".to_string(), lam);
         let result = eval_with("tail((1, 2, 3))", &vars).unwrap();
         assert!(approx_arr(&tuple(&result), &[2.0, 3.0]));
@@ -1180,9 +1032,9 @@ mod tests {
 
     #[test]
     fn lambda_decomposition_exact_match() {
-        // (|(a, b)| a+b) with (1, 2) - exact match, b gets scalar
+        // |(a, b)|(a+b) with (1, 2) - exact match, b gets scalar
         let mut vars = HashMap::new();
-        let lam = eval("(|(a, b)| a + b)").unwrap();
+        let lam = eval("|(a, b)|(a + b)").unwrap();
         vars.insert("add".to_string(), lam);
         let result = eval_with("add((1, 2))", &vars).unwrap();
         assert!(approx(scalar(&result), 3.0));
@@ -1190,13 +1042,13 @@ mod tests {
 
     #[test]
     fn filter_lambda_decomposition() {
-        // TupleArray of width 3, filter with (|(i, rest)| ...)
+        // TupleArray of width 3, filter with |(i, rest)|(...)
         // rest should be the tuple (a, b, c)
         let mut vars = HashMap::new();
         let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
         vars.insert("ta".to_string(), ta);
         // Filter where index == 0
-        let lam = eval("(|(i, rest)| i == 0)").unwrap();
+        let lam = eval("|(i, rest)|(i == 0)").unwrap();
         vars.insert("first_only".to_string(), lam);
         let result = eval_with("ta[first_only]", &vars).unwrap();
         let (w, d) = tuple_array(&result);
@@ -1206,10 +1058,10 @@ mod tests {
 
     #[test]
     fn filter_lambda_decomposition_two_params() {
-        // Array filter with (|(i, x)| ...) - x is the element
+        // Array filter with |(i, x)|(i == 1) - x is the element
         let mut vars = HashMap::new();
         vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0]));
-        let lam = eval("(|(i, x)| i == 1)").unwrap();
+        let lam = eval("|(i, x)|(i == 1)").unwrap();
         vars.insert("second".to_string(), lam);
         let result = eval_with("arr[second]", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[20.0]));
@@ -1218,11 +1070,11 @@ mod tests {
     #[test]
     fn tuple_array_lambda_decomposition() {
         // Map over TupleArray with decomposition
-        // {(1,2,3), (4,5,6)} with (|(a, rest)| a) should give {1, 4}
+        // {(1,2,3), (4,5,6)} with |(a, rest)|(a) should give {1, 4}
         let mut vars = HashMap::new();
         let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
         vars.insert("ta".to_string(), ta);
-        let lam = eval("(|(a, rest)| a)").unwrap();
+        let lam = eval("|(a, rest)|(a)").unwrap();
         vars.insert("first_elem".to_string(), lam);
         let result = eval_with("first_elem(ta)", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[1.0, 4.0]));
@@ -1230,11 +1082,11 @@ mod tests {
 
     #[test]
     fn filter_three_dim_tuple_array_by_index() {
-        // This is the user's example: x[(|(i,y)| i==0)] on 3D tuple array
+        // This is the user's example: x[|(i,y)|(i==0)] on 3D tuple array
         let mut vars = HashMap::new();
         let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
         vars.insert("x".to_string(), ta);
-        let lam = eval("(|(i, y)| i == 0)").unwrap();
+        let lam = eval("|(i, y)|(i == 0)").unwrap();
         vars.insert("f".to_string(), lam);
         let result = eval_with("x[f]", &vars).unwrap();
         let (w, d) = tuple_array(&result);
@@ -1351,7 +1203,7 @@ mod tests {
     fn tensor_product_with_lambda() {
         // Create tensor product, then apply lambda
         let mut vars = HashMap::new();
-        let lam = eval("(|(x, y)| x + y)").unwrap();
+        let lam = eval("|(x, y)|(x + y)").unwrap();
         vars.insert("add".to_string(), lam);
         // {1, 2} ** {10, 20} = {(1,10), (1,20), (2,10), (2,20)}
         // add on that = {11, 21, 12, 22}
@@ -1405,7 +1257,7 @@ mod tests {
     fn inline_lambda_single_param() {
         // Single param lambda used in function call (not filter)
         let mut vars = HashMap::new();
-        vars.insert("sq".to_string(), eval("(|x| x*x)").unwrap());
+        vars.insert("sq".to_string(), eval("|x|(x*x)").unwrap());
         let v = eval_with("sq(5)", &vars).unwrap();
         assert!(approx(scalar(&v), 25.0));
     }
@@ -1413,14 +1265,14 @@ mod tests {
     #[test]
     fn inline_lambda_multi_param() {
         // Multi-param lambda inline
-        let v = eval("{1, 2, 3, 4, 5}[(|(i,x)| x > 2)]").unwrap();
+        let v = eval("{1, 2, 3, 4, 5}[|(i,x)|(x > 2)]").unwrap();
         assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
     }
 
     #[test]
     fn inline_lambda_tensor_filter() {
-        // The user's example: ([10]**[10])[(|(i,x,y)| x*y > 10)]
-        let v = eval("([3]**[3])[(|(i,x,y)| x*y > 1)]").unwrap();
+        // The user's example: ([10]**[10])[|(i,x,y)|(x*y > 10)]
+        let v = eval("([3]**[3])[|(i,x,y)|(x*y > 1)]").unwrap();
         // 3x3 = pairs (0,0)..(2,2), filter where x*y > 1
         // (1,2), (2,1), (2,2) have products 2, 2, 4 > 1
         let (w, d) = tuple_array(&v);
@@ -1431,11 +1283,10 @@ mod tests {
     #[test]
     fn inline_lambda_as_value() {
         // Lambda literal evaluates to a lambda value
-        let v = eval("(|x| x + 1)").unwrap();
+        let v = eval("|x|(x + 1)").unwrap();
         match v {
-            Value::Lambda { params, body } => {
+            Value::Lambda { params, .. } => {
                 assert_eq!(params, vec!["x"]);
-                assert_eq!(body, "x + 1");
             }
             _ => panic!("expected lambda"),
         }
@@ -1443,8 +1294,8 @@ mod tests {
 
     #[test]
     fn user_example_tensor_filter() {
-        // The exact example the user asked about (with parens)
-        let v = eval("([10]**[10])[(|(i,x,y)|x*y>10)]").unwrap();
+        // The exact example the user asked about (with new syntax)
+        let v = eval("([10]**[10])[|(i,x,y)|(x*y>10)]").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
         assert!(d.len() > 0);
@@ -1453,19 +1304,17 @@ mod tests {
         }
     }
 
-    // Short lambda syntax tests (without outer parentheses)
-
     #[test]
-    fn short_lambda_filter() {
-        // |x| body syntax in filter
-        let v = eval("{1, 2, 3, 4, 5}[|(i,x)| x > 2]").unwrap();
+    fn lambda_filter() {
+        // |x|(body) syntax in filter
+        let v = eval("{1, 2, 3, 4, 5}[|(i,x)|(x > 2)]").unwrap();
         assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
     }
 
     #[test]
-    fn short_lambda_tensor_filter() {
-        // User's preferred syntax: no outer parens
-        let v = eval("([10]**[10])[|(i,x,y)|x*y>10]").unwrap();
+    fn lambda_tensor_filter() {
+        // Lambda filter on tensor product
+        let v = eval("([10]**[10])[|(i,x,y)|(x*y>10)]").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
         assert!(d.len() > 0);
@@ -1475,26 +1324,24 @@ mod tests {
     }
 
     #[test]
-    fn short_lambda_as_value() {
-        // Short lambda at top level
-        let v = eval("|x| x + 1").unwrap();
+    fn lambda_as_value() {
+        // Lambda at top level
+        let v = eval("|x|(x + 1)").unwrap();
         match v {
-            Value::Lambda { params, body } => {
+            Value::Lambda { params, .. } => {
                 assert_eq!(params, vec!["x"]);
-                assert_eq!(body, "x + 1");
             }
             _ => panic!("expected lambda"),
         }
     }
 
     #[test]
-    fn short_lambda_multi_param() {
-        // Short multi-param lambda
-        let v = eval("|(x,y)| x + y").unwrap();
+    fn lambda_multi_param() {
+        // Multi-param lambda
+        let v = eval("|(x,y)|(x + y)").unwrap();
         match v {
-            Value::Lambda { params, body } => {
+            Value::Lambda { params, .. } => {
                 assert_eq!(params, vec!["x", "y"]);
-                assert_eq!(body, "x + y");
             }
             _ => panic!("expected lambda"),
         }
@@ -1505,5 +1352,168 @@ mod tests {
         // || should still be logical or, not lambda
         let v = eval("1 || 0").unwrap();
         assert!(approx(scalar(&v), 1.0));
+    }
+
+    // AST-based lambda tests
+
+    #[test]
+    fn ast_lambda_nested_arithmetic() {
+        // Lambda body with complex arithmetic
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(x*x + 2*x + 1)").unwrap();
+        vars.insert("f".to_string(), lam);
+        // f(3) = 9 + 6 + 1 = 16
+        let result = eval_with("f(3)", &vars).unwrap();
+        assert!(approx(scalar(&result), 16.0));
+    }
+
+    #[test]
+    fn ast_lambda_with_builtin() {
+        // Lambda using builtin function
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(sqrt(x))").unwrap();
+        vars.insert("sq".to_string(), lam);
+        let result = eval_with("sq(16)", &vars).unwrap();
+        assert!(approx(scalar(&result), 4.0));
+    }
+
+    #[test]
+    fn ast_lambda_comparison_in_body() {
+        // Lambda with comparison operators
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(x > 5)").unwrap();
+        vars.insert("gt5".to_string(), lam);
+        assert!(approx(scalar(&eval_with("gt5(10)", &vars).unwrap()), 1.0));
+        assert!(approx(scalar(&eval_with("gt5(3)", &vars).unwrap()), 0.0));
+    }
+
+    #[test]
+    fn ast_lambda_boolean_ops() {
+        // Lambda with boolean operators
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(x > 0 && x < 10)").unwrap();
+        vars.insert("inrange".to_string(), lam);
+        assert!(approx(scalar(&eval_with("inrange(5)", &vars).unwrap()), 1.0));
+        assert!(approx(scalar(&eval_with("inrange(-1)", &vars).unwrap()), 0.0));
+        assert!(approx(scalar(&eval_with("inrange(15)", &vars).unwrap()), 0.0));
+    }
+
+    #[test]
+    fn ast_lambda_inline_in_filter() {
+        // Inline lambda directly in filter expression (needs i,x pattern)
+        let v = eval("{1, 2, 3, 4, 5}[|(i,x)|(x > 3)]").unwrap();
+        assert!(approx_arr(&array(&v), &[4.0, 5.0]));
+    }
+
+    #[test]
+    fn ast_lambda_inline_multi_param_filter() {
+        // Inline multi-param lambda in filter
+        let v = eval("{10, 20, 30}[|(i,x)|(i == 1)]").unwrap();
+        assert!(approx_arr(&array(&v), &[20.0]));
+    }
+
+    #[test]
+    fn ast_lambda_power_in_body() {
+        // Lambda with power operator
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(x^3)").unwrap();
+        vars.insert("cube".to_string(), lam);
+        let result = eval_with("cube(2)", &vars).unwrap();
+        assert!(approx(scalar(&result), 8.0));
+    }
+
+    #[test]
+    fn ast_lambda_negation() {
+        // Lambda with unary negation
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(-x)").unwrap();
+        vars.insert("neg".to_string(), lam);
+        let result = eval_with("neg(5)", &vars).unwrap();
+        assert!(approx(scalar(&result), -5.0));
+    }
+
+    #[test]
+    fn ast_lambda_not_operator() {
+        // Lambda with logical not
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(!(x > 5))").unwrap();
+        vars.insert("le5".to_string(), lam);
+        assert!(approx(scalar(&eval_with("le5(3)", &vars).unwrap()), 1.0));
+        assert!(approx(scalar(&eval_with("le5(10)", &vars).unwrap()), 0.0));
+    }
+
+    #[test]
+    fn ast_tensor_product_filter_inline() {
+        // The original user example with new syntax
+        let v = eval("([5]**[5])[|(i,x,y)|(x*y > 6)]").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        // All pairs where product > 6: (2,4), (3,3), (3,4), (4,2), (4,3), (4,4)
+        for chunk in d.chunks(2) {
+            assert!(chunk[0] * chunk[1] > 6.0);
+        }
+    }
+
+    #[test]
+    fn ast_lambda_with_constants() {
+        // Lambda using pi and e constants
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(x * pi)").unwrap();
+        vars.insert("mult_pi".to_string(), lam);
+        let result = eval_with("mult_pi(2)", &vars).unwrap();
+        assert!(approx(scalar(&result), 2.0 * std::f64::consts::PI));
+    }
+
+    #[test]
+    fn ast_lambda_array_input() {
+        // Lambda applied to array
+        let mut vars = HashMap::new();
+        let lam = eval("|x|(x * 2)").unwrap();
+        vars.insert("double".to_string(), lam);
+        let result = eval_with("double({1, 2, 3})", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[2.0, 4.0, 6.0]));
+    }
+
+    #[test]
+    fn ast_lambda_tuple_sum() {
+        // Multi-param lambda summing tuple elements
+        let mut vars = HashMap::new();
+        let lam = eval("|(a,b,c)|(a + b + c)").unwrap();
+        vars.insert("sum3".to_string(), lam);
+        let result = eval_with("sum3((10, 20, 30))", &vars).unwrap();
+        assert!(approx(scalar(&result), 60.0));
+    }
+
+    #[test]
+    fn ast_lambda_tuple_product() {
+        // Multi-param lambda multiplying tuple elements
+        let mut vars = HashMap::new();
+        let lam = eval("|(x,y)|(x * y)").unwrap();
+        vars.insert("prod".to_string(), lam);
+        let result = eval_with("prod((7, 8))", &vars).unwrap();
+        assert!(approx(scalar(&result), 56.0));
+    }
+
+    #[test]
+    fn ast_lambda_complex_filter_condition() {
+        // Complex filter: keep elements where (i + x) is even
+        let v = eval("{10, 11, 12, 13, 14}[|(i,x)|(floor((i+x)/2)*2 == i+x)]").unwrap();
+        // i=0,x=10: 10 even -> keep
+        // i=1,x=11: 12 even -> keep
+        // i=2,x=12: 14 even -> keep
+        // i=3,x=13: 16 even -> keep
+        // i=4,x=14: 18 even -> keep
+        assert!(approx_arr(&array(&v), &[10.0, 11.0, 12.0, 13.0, 14.0]));
+    }
+
+    #[test]
+    fn ast_define_and_use_lambda() {
+        // Define lambda in vars and use it
+        let mut vars = HashMap::new();
+        let lam = eval("|n|(n * (n + 1) / 2)").unwrap();
+        vars.insert("triangular".to_string(), lam);
+        // triangular(5) = 5*6/2 = 15
+        let result = eval_with("triangular(5)", &vars).unwrap();
+        assert!(approx(scalar(&result), 15.0));
     }
 }

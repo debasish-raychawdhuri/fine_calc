@@ -1,4 +1,5 @@
 use std::fmt;
+use crate::ast::Expr;
 
 /// Tolerance for comparing floating point values to zero
 pub const ZERO_TOLERANCE: f64 = 1e-10;
@@ -9,7 +10,7 @@ pub enum Value {
     Array(Vec<f64>),
     Tuple(Vec<f64>),
     TupleArray { width: usize, data: Vec<f64> },
-    Lambda { params: Vec<String>, body: String },
+    Lambda { params: Vec<String>, body: Box<Expr> },
 }
 
 impl fmt::Display for Value {
@@ -56,9 +57,9 @@ impl fmt::Display for Value {
             }
             Value::Lambda { params, body } => {
                 if params.len() == 1 {
-                    write!(f, "(|{}| {})", params[0], body)
+                    write!(f, "|{}|({})", params[0], body)
                 } else {
-                    write!(f, "(|({})| {})", params.join(","), body)
+                    write!(f, "|({})|({})", params.join(", "), body)
                 }
             }
         }

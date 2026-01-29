@@ -61,6 +61,68 @@ fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Val
         })
 }
 
+/// Check if identifier is valid
+fn is_valid_ident(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && (s.starts_with('_') || s.chars().next().unwrap().is_alphabetic())
+}
+
+/// Parse a tuple pattern like (a, b, c) and return the variable names
+fn parse_tuple_pattern(s: &str) -> Option<Vec<String>> {
+    let s = s.trim();
+    if s.starts_with('(') && s.ends_with(')') {
+        let inner = &s[1..s.len() - 1];
+        let vars: Vec<String> = inner.split(',').map(|v| v.trim().to_string()).collect();
+        if vars.len() >= 2 && vars.iter().all(|v| is_valid_ident(v)) {
+            return Some(vars);
+        }
+    }
+    None
+}
+
+/// Represents what kind of assignment we have
+enum Assignment {
+    /// Single variable assignment: x = expr
+    Single(String),
+    /// Tuple destructuring: (a, b, c) = expr
+    Tuple(Vec<String>),
+}
+
+/// Parse the left-hand side of an assignment
+fn parse_assignment(trimmed: &str) -> (Option<Assignment>, &str) {
+    // Find a standalone '=' that is not part of ==, !=, >=, <=
+    let mut assign_pos = None;
+    let bytes = trimmed.as_bytes();
+    for i in 0..bytes.len() {
+        if bytes[i] == b'=' {
+            let prev = if i > 0 { bytes[i - 1] } else { 0 };
+            let next = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
+            if prev != b'!' && prev != b'>' && prev != b'<' && prev != b'=' && next != b'=' {
+                assign_pos = Some(i);
+                break;
+            }
+        }
+    }
+
+    if let Some(eq_pos) = assign_pos {
+        let lhs = trimmed[..eq_pos].trim();
+        let rhs = trimmed[eq_pos + 1..].trim();
+
+        // Check for tuple pattern: (a, b, c) = expr
+        if let Some(vars) = parse_tuple_pattern(lhs) {
+            return (Some(Assignment::Tuple(vars)), rhs);
+        }
+
+        // Check for single variable: x = expr
+        if is_valid_ident(lhs) {
+            return (Some(Assignment::Single(lhs.to_string())), rhs);
+        }
+    }
+
+    (None, trimmed)
+}
+
 fn main() {
     initscr();
     cbreak();
@@ -252,38 +314,29 @@ fn main() {
             KEY_ENTER | 10 => {
                 if !input.trim().is_empty() {
                     let trimmed = input.trim();
-                    let (var_name, expr_str) = {
-                        // Find a standalone '=' that is not part of ==, !=, >=, <=
-                        let mut assign_pos = None;
-                        let bytes = trimmed.as_bytes();
-                        for i in 0..bytes.len() {
-                            if bytes[i] == b'=' {
-                                let prev = if i > 0 { bytes[i - 1] } else { 0 };
-                                let next = if i + 1 < bytes.len() { bytes[i + 1] } else { 0 };
-                                if prev != b'!' && prev != b'>' && prev != b'<' && prev != b'=' && next != b'=' {
-                                    assign_pos = Some(i);
-                                    break;
-                                }
-                            }
-                        }
-                        if let Some(eq_pos) = assign_pos {
-                            let lhs = trimmed[..eq_pos].trim();
-                            if !lhs.is_empty() && lhs.chars().all(|c| c.is_alphanumeric() || c == '_') && (lhs.starts_with('_') || lhs.chars().next().unwrap().is_alphabetic()) {
-                                (Some(lhs.to_string()), trimmed[eq_pos + 1..].trim())
-                            } else {
-                                (None, trimmed)
-                            }
-                        } else {
-                            (None, trimmed)
-                        }
-                    };
+                    let (assignment, expr_str) = parse_assignment(trimmed);
                     let result = evaluate_expression(expr_str, &variables);
                     match result {
                         Ok(res) => {
                             history.push(format!(">> {}", input));
                             history.push(format!("{}", &res));
-                            if let Some(name) = var_name {
-                                variables.insert(name, res);
+                            match assignment {
+                                Some(Assignment::Single(name)) => {
+                                    variables.insert(name, res);
+                                }
+                                Some(Assignment::Tuple(names)) => {
+                                    match res.decompose_tuple(names.len()) {
+                                        Ok(values) => {
+                                            for (name, val) in names.into_iter().zip(values) {
+                                                variables.insert(name, val);
+                                            }
+                                        }
+                                        Err(e) => {
+                                            history.push(format!("Error: {}", e));
+                                        }
+                                    }
+                                }
+                                None => {}
                             }
                         }
                         Err(e) => {
@@ -743,5 +796,212 @@ mod tests {
         vars.insert("sum3".to_string(), lam);
         let result = eval_with("sum3((1, 2, 3))", &vars).unwrap();
         assert!(approx(scalar(&result), 6.0));
+    }
+
+    // Single-element tuple reduction tests
+
+    #[test]
+    fn single_element_tuple_reduces_to_scalar() {
+        // A tuple with one element should become a scalar
+        // We can test this via decomposition: (a, b) = (1, 2) then b should be scalar 2
+        let t = Value::Tuple(vec![1.0, 2.0]);
+        let decomposed = t.decompose_tuple(2).unwrap();
+        assert!(approx(scalar(&decomposed[0]), 1.0));
+        assert!(approx(scalar(&decomposed[1]), 2.0));
+    }
+
+    #[test]
+    fn decompose_tuple_rest_is_tuple() {
+        // (a, b) = (1, 2, 3) => a=1, b=(2,3)
+        let t = Value::Tuple(vec![1.0, 2.0, 3.0]);
+        let decomposed = t.decompose_tuple(2).unwrap();
+        assert!(approx(scalar(&decomposed[0]), 1.0));
+        assert!(approx_arr(&tuple(&decomposed[1]), &[2.0, 3.0]));
+    }
+
+    #[test]
+    fn decompose_tuple_three_vars() {
+        // (a, b, c) = (1, 2, 3, 4) => a=1, b=2, c=(3,4)
+        let t = Value::Tuple(vec![1.0, 2.0, 3.0, 4.0]);
+        let decomposed = t.decompose_tuple(3).unwrap();
+        assert!(approx(scalar(&decomposed[0]), 1.0));
+        assert!(approx(scalar(&decomposed[1]), 2.0));
+        assert!(approx_arr(&tuple(&decomposed[2]), &[3.0, 4.0]));
+    }
+
+    #[test]
+    fn decompose_tuple_exact_match() {
+        // (a, b, c) = (1, 2, 3) => a=1, b=2, c=3
+        let t = Value::Tuple(vec![1.0, 2.0, 3.0]);
+        let decomposed = t.decompose_tuple(3).unwrap();
+        assert!(approx(scalar(&decomposed[0]), 1.0));
+        assert!(approx(scalar(&decomposed[1]), 2.0));
+        assert!(approx(scalar(&decomposed[2]), 3.0));
+    }
+
+    #[test]
+    fn decompose_tuple_not_enough_elements_error() {
+        let t = Value::Tuple(vec![1.0]);
+        assert!(t.decompose_tuple(2).is_err());
+    }
+
+    // Array indexing tests
+
+    #[test]
+    fn array_index_scalar() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0]));
+        let result = eval_with("arr[0]", &vars).unwrap();
+        assert!(approx(scalar(&result), 10.0));
+        let result = eval_with("arr[2]", &vars).unwrap();
+        assert!(approx(scalar(&result), 30.0));
+    }
+
+    #[test]
+    fn array_index_expression() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0]));
+        let result = eval_with("arr[1+1]", &vars).unwrap();
+        assert!(approx(scalar(&result), 30.0));
+    }
+
+    #[test]
+    fn array_index_out_of_bounds() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0]));
+        let result = eval_with("arr[5]", &vars);
+        assert!(result.is_err());
+    }
+
+    // Array filter/comprehension tests
+
+    #[test]
+    fn array_filter_lambda_two_params() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0, 4.0, 5.0]));
+        // Filter elements > 2: arr[pred] where pred = (|(i,x)| x > 2)
+        let lam = eval("(|(i,x)| x > 2)").unwrap();
+        vars.insert("pred".to_string(), lam);
+        let result = eval_with("arr[pred]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[3.0, 4.0, 5.0]));
+    }
+
+    #[test]
+    fn array_filter_even_indices() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
+        // Filter even indices: i % 2 == 0
+        // We can use floor(i/2)*2 == i to check evenness
+        let lam = eval("(|(i,x)| floor(i/2)*2 == i)").unwrap();
+        vars.insert("even_idx".to_string(), lam);
+        let result = eval_with("arr[even_idx]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[10.0, 30.0, 50.0]));
+    }
+
+    #[test]
+    fn array_filter_positive() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![-2.0, -1.0, 0.0, 1.0, 2.0]));
+        let lam = eval("(|(i,x)| x > 0)").unwrap();
+        vars.insert("pos".to_string(), lam);
+        let result = eval_with("arr[pos]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[1.0, 2.0]));
+    }
+
+    #[test]
+    fn array_filter_empty_result() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
+        let lam = eval("(|(i,x)| x > 100)").unwrap();
+        vars.insert("never".to_string(), lam);
+        let result = eval_with("arr[never]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[]));
+    }
+
+    #[test]
+    fn array_filter_all_pass() {
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
+        let lam = eval("(|(i,x)| 1)").unwrap();
+        vars.insert("always".to_string(), lam);
+        let result = eval_with("arr[always]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn range_then_filter() {
+        // [10][gt5] where gt5 = (|(i,x)| x > 5) should give {6, 7, 8, 9}
+        let mut vars = HashMap::new();
+        let lam = eval("(|(i,x)| x > 5)").unwrap();
+        vars.insert("gt5".to_string(), lam);
+        let result = eval_with("[10][gt5]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[6.0, 7.0, 8.0, 9.0]));
+    }
+
+    #[test]
+    fn tuple_array_index() {
+        let mut vars = HashMap::new();
+        let ta = Value::TupleArray { width: 2, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
+        vars.insert("ta".to_string(), ta);
+        // ta[0] should give (1, 2)
+        let result = eval_with("ta[0]", &vars).unwrap();
+        assert!(approx_arr(&tuple(&result), &[1.0, 2.0]));
+        // ta[2] should give (5, 6)
+        let result = eval_with("ta[2]", &vars).unwrap();
+        assert!(approx_arr(&tuple(&result), &[5.0, 6.0]));
+    }
+
+    #[test]
+    fn tuple_array_filter() {
+        let mut vars = HashMap::new();
+        // {(1,10), (2,20), (3,30)} filter where first element > 1
+        let ta = Value::TupleArray { width: 2, data: vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0] };
+        vars.insert("ta".to_string(), ta);
+        // Filter: keep tuples where x > 1 (x is the first element of the tuple)
+        let lam = eval("(|(i,x,y)| x > 1)").unwrap();
+        vars.insert("f".to_string(), lam);
+        let result = eval_with("ta[f]", &vars).unwrap();
+        let (w, d) = tuple_array(&result);
+        assert_eq!(w, 2);
+        assert!(approx_arr(&d, &[2.0, 20.0, 3.0, 30.0]));
+    }
+
+    #[test]
+    fn chained_indexing() {
+        // Test chained indexing: create array, then filter, then index
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
+        let lam = eval("(|(i,x)| x > 20)").unwrap();
+        vars.insert("gt20".to_string(), lam);
+        // arr[gt20][0] should give 30
+        let result = eval_with("arr[gt20][0]", &vars).unwrap();
+        assert!(approx(scalar(&result), 30.0));
+    }
+
+    #[test]
+    fn filter_with_precision_tolerance() {
+        // Test that values very close to zero are treated as falsy
+        let mut vars = HashMap::new();
+        vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0]));
+        // A tiny value below the 1e-10 threshold should be falsy
+        let lam = eval("(|(i,x)| 0.00000000001)").unwrap(); // 1e-11, below threshold
+        vars.insert("tiny".to_string(), lam);
+        let result = eval_with("arr[tiny]", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[])); // All filtered out
+    }
+
+    // Parse assignment tests
+
+    #[test]
+    fn parse_tuple_pattern_valid() {
+        assert_eq!(parse_tuple_pattern("(a, b)"), Some(vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(parse_tuple_pattern("(x, y, z)"), Some(vec!["x".to_string(), "y".to_string(), "z".to_string()]));
+    }
+
+    #[test]
+    fn parse_tuple_pattern_invalid() {
+        assert_eq!(parse_tuple_pattern("(a)"), None); // single element
+        assert_eq!(parse_tuple_pattern("a, b"), None); // no parens
+        assert_eq!(parse_tuple_pattern("(1, 2)"), None); // numbers not idents
     }
 }

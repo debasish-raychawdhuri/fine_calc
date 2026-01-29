@@ -1,5 +1,8 @@
 use std::fmt;
 
+/// Tolerance for comparing floating point values to zero
+pub const ZERO_TOLERANCE: f64 = 1e-10;
+
 #[derive(Debug, Clone)]
 pub enum Value {
     Scalar(f64),
@@ -70,7 +73,39 @@ impl Value {
         }
     }
 
+    /// Check if a value is truthy (non-zero with tolerance)
+    pub fn is_truthy(v: f64) -> bool {
+        v.abs() >= ZERO_TOLERANCE
+    }
+
+    /// Get element at index from Array (returns Scalar) or TupleArray (returns Tuple or Scalar if width=1)
+    pub fn get_at(&self, idx: usize) -> Option<Value> {
+        match self {
+            Value::Array(a) => a.get(idx).map(|&v| Value::Scalar(v)),
+            Value::TupleArray { width, data } => {
+                let count = data.len() / width;
+                if idx < count {
+                    let tuple_data: Vec<f64> = data[idx * width..(idx + 1) * width].to_vec();
+                    Some(Self::tuple_or_scalar(tuple_data))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Convert a vec to Tuple or Scalar if single element
+    fn tuple_or_scalar(v: Vec<f64>) -> Value {
+        if v.len() == 1 {
+            Value::Scalar(v[0])
+        } else {
+            Value::Tuple(v)
+        }
+    }
+
     /// Build a tuple (or tuple array with broadcasting) from a list of values.
+    /// Single-element tuples are reduced to scalars.
     pub fn make_tuple(elems: Vec<Value>) -> Result<Value, &'static str> {
         // Check if any element is array-like
         let has_array = elems.iter().any(|e| matches!(e, Value::Array(_) | Value::TupleArray { .. }));
@@ -85,7 +120,8 @@ impl Value {
                     _ => return Err("Cannot include lambda in tuple"),
                 }
             }
-            Ok(Value::Tuple(flat))
+            // Reduce single-element tuple to scalar
+            Ok(Self::tuple_or_scalar(flat))
         } else {
             // Determine max array length and tuple width
             let mut max_len: usize = 0;
@@ -121,7 +157,42 @@ impl Value {
                     }
                 }
             }
-            Ok(Value::TupleArray { width: total_width, data })
+            // If width is 1, return Array instead of TupleArray
+            if total_width == 1 {
+                Ok(Value::Array(data))
+            } else {
+                Ok(Value::TupleArray { width: total_width, data })
+            }
+        }
+    }
+
+    /// Decompose a tuple for destructuring assignment.
+    /// Given n variable names, first n-1 get one element each, last gets the rest.
+    /// Returns Vec of Values to assign to each variable.
+    pub fn decompose_tuple(&self, n: usize) -> Result<Vec<Value>, &'static str> {
+        match self {
+            Value::Tuple(t) => {
+                if t.len() < n {
+                    return Err("Not enough elements in tuple for destructuring");
+                }
+                let mut result = Vec::with_capacity(n);
+                // First n-1 variables get one element each
+                for i in 0..n - 1 {
+                    result.push(Value::Scalar(t[i]));
+                }
+                // Last variable gets the rest
+                let rest: Vec<f64> = t[n - 1..].to_vec();
+                result.push(Self::tuple_or_scalar(rest));
+                Ok(result)
+            }
+            Value::Scalar(v) => {
+                if n == 1 {
+                    Ok(vec![Value::Scalar(*v)])
+                } else {
+                    Err("Cannot destructure scalar into multiple variables")
+                }
+            }
+            _ => Err("Can only destructure tuples"),
         }
     }
 
@@ -199,23 +270,23 @@ impl Value {
     }
 
     pub fn eq_val(self, other: Value) -> Result<Value, &'static str> {
-        self.broadcast_op(other, |a, b| if (a - b).abs() < 1e-10 { 1.0 } else { 0.0 })
+        self.broadcast_op(other, |a, b| if (a - b).abs() < ZERO_TOLERANCE { 1.0 } else { 0.0 })
     }
 
     pub fn ne_val(self, other: Value) -> Result<Value, &'static str> {
-        self.broadcast_op(other, |a, b| if (a - b).abs() >= 1e-10 { 1.0 } else { 0.0 })
+        self.broadcast_op(other, |a, b| if (a - b).abs() >= ZERO_TOLERANCE { 1.0 } else { 0.0 })
     }
 
     pub fn and(self, other: Value) -> Result<Value, &'static str> {
-        self.broadcast_op(other, |a, b| if a != 0.0 && b != 0.0 { 1.0 } else { 0.0 })
+        self.broadcast_op(other, |a, b| if Self::is_truthy(a) && Self::is_truthy(b) { 1.0 } else { 0.0 })
     }
 
     pub fn or(self, other: Value) -> Result<Value, &'static str> {
-        self.broadcast_op(other, |a, b| if a != 0.0 || b != 0.0 { 1.0 } else { 0.0 })
+        self.broadcast_op(other, |a, b| if Self::is_truthy(a) || Self::is_truthy(b) { 1.0 } else { 0.0 })
     }
 
     pub fn not(self) -> Result<Value, &'static str> {
-        self.apply_fn(|v| if v == 0.0 { 1.0 } else { 0.0 })
+        self.apply_fn(|v| if Self::is_truthy(v) { 0.0 } else { 1.0 })
     }
 
     pub fn neg(self) -> Result<Value, &'static str> {

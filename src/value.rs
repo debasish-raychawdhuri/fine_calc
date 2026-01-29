@@ -311,4 +311,61 @@ impl Value {
             _ => Err("Range requires a scalar argument"),
         }
     }
+
+    /// Convert a value to a list of "rows" where each row is a Vec<f64>.
+    /// Scalar -> single row with 1 element
+    /// Tuple -> single row with all elements
+    /// Array -> multiple rows, each with 1 element
+    /// TupleArray -> multiple rows, each with `width` elements
+    fn to_rows(&self) -> Result<Vec<Vec<f64>>, &'static str> {
+        match self {
+            Value::Scalar(v) => Ok(vec![vec![*v]]),
+            Value::Tuple(t) => Ok(vec![t.clone()]),
+            Value::Array(a) => Ok(a.iter().map(|&v| vec![v]).collect()),
+            Value::TupleArray { width, data } => {
+                let count = data.len() / width;
+                Ok((0..count).map(|i| data[i * width..(i + 1) * width].to_vec()).collect())
+            }
+            Value::Lambda { .. } => Err("Cannot use lambda in tensor product"),
+        }
+    }
+
+    /// Tensor product (Cartesian product with tuple flattening).
+    /// For arrays x and y, x ** y produces all pairs (xi, yj) for each xi in x and yj in y.
+    /// The order iterates through y completely for each element of x.
+    pub fn tensor_product(self, other: Value) -> Result<Value, &'static str> {
+        let left_rows = self.to_rows()?;
+        let right_rows = other.to_rows()?;
+
+        if left_rows.is_empty() || right_rows.is_empty() {
+            // Empty result
+            return Ok(Value::Array(vec![]));
+        }
+
+        let left_width = left_rows[0].len();
+        let right_width = right_rows[0].len();
+        let total_width = left_width + right_width;
+
+        let result_count = left_rows.len() * right_rows.len();
+        let mut data = Vec::with_capacity(result_count * total_width);
+
+        for l in &left_rows {
+            for r in &right_rows {
+                data.extend(l);
+                data.extend(r);
+            }
+        }
+
+        if result_count == 1 {
+            // Single element result
+            Ok(Self::tuple_or_scalar(data))
+        } else {
+            // Multiple elements
+            if total_width == 1 {
+                Ok(Value::Array(data))
+            } else {
+                Ok(Value::TupleArray { width: total_width, data })
+            }
+        }
+    }
 }

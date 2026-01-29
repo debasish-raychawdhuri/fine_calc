@@ -34,6 +34,7 @@ Expr: Value = {
 };
 
 Factor: Value = {
+    <l:Factor> "**" <r:Power> =>? l.tensor_product(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     <l:Factor> "*" <r:Power> =>? l.mul(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     <l:Factor> "/" <r:Power> =>? l.div(r).map_err(|e| lalrpop_util::ParseError::User { error: e }),
     Power,

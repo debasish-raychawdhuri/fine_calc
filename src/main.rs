@@ -1090,4 +1090,121 @@ mod tests {
         assert_eq!(w, 3);
         assert!(approx_arr(&d, &[1.0, 2.0, 3.0])); // First element only
     }
+
+    // Tensor product tests
+
+    #[test]
+    fn tensor_product_scalars() {
+        // 1 ** 2 = (1, 2)
+        let v = eval("1 ** 2").unwrap();
+        assert!(approx_arr(&tuple(&v), &[1.0, 2.0]));
+    }
+
+    #[test]
+    fn tensor_product_scalar_array() {
+        // 5 ** {1, 2, 3} = {(5, 1), (5, 2), (5, 3)}
+        let v = eval("5 ** {1, 2, 3}").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        assert!(approx_arr(&d, &[5.0, 1.0, 5.0, 2.0, 5.0, 3.0]));
+    }
+
+    #[test]
+    fn tensor_product_array_scalar() {
+        // {1, 2} ** 10 = {(1, 10), (2, 10)}
+        let v = eval("{1, 2} ** 10").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        assert!(approx_arr(&d, &[1.0, 10.0, 2.0, 10.0]));
+    }
+
+    #[test]
+    fn tensor_product_arrays() {
+        // {1, 2} ** {10, 20, 30} = {(1,10), (1,20), (1,30), (2,10), (2,20), (2,30)}
+        let v = eval("{1, 2} ** {10, 20, 30}").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        assert!(approx_arr(&d, &[1.0, 10.0, 1.0, 20.0, 1.0, 30.0, 2.0, 10.0, 2.0, 20.0, 2.0, 30.0]));
+    }
+
+    #[test]
+    fn tensor_product_tuple_scalar() {
+        // (1, 2) ** 3 = (1, 2, 3)
+        let v = eval("(1, 2) ** 3").unwrap();
+        assert!(approx_arr(&tuple(&v), &[1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn tensor_product_tuples() {
+        // (1, 2) ** (3, 4) = (1, 2, 3, 4)
+        let v = eval("(1, 2) ** (3, 4)").unwrap();
+        assert!(approx_arr(&tuple(&v), &[1.0, 2.0, 3.0, 4.0]));
+    }
+
+    #[test]
+    fn tensor_product_tuple_array() {
+        // (1, 2) ** {10, 20} = {(1, 2, 10), (1, 2, 20)}
+        let v = eval("(1, 2) ** {10, 20}").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 3);
+        assert!(approx_arr(&d, &[1.0, 2.0, 10.0, 1.0, 2.0, 20.0]));
+    }
+
+    #[test]
+    fn tensor_product_array_tuple() {
+        // {1, 2} ** (10, 20) = {(1, 10, 20), (2, 10, 20)}
+        let v = eval("{1, 2} ** (10, 20)").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 3);
+        assert!(approx_arr(&d, &[1.0, 10.0, 20.0, 2.0, 10.0, 20.0]));
+    }
+
+    #[test]
+    fn tensor_product_tuple_arrays() {
+        // {(1, 2), (3, 4)} ** {10, 20} = {(1,2,10), (1,2,20), (3,4,10), (3,4,20)}
+        let v = eval("{(1, 2), (3, 4)} ** {10, 20}").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 3);
+        assert!(approx_arr(&d, &[1.0, 2.0, 10.0, 1.0, 2.0, 20.0, 3.0, 4.0, 10.0, 3.0, 4.0, 20.0]));
+    }
+
+    #[test]
+    fn tensor_product_ranges() {
+        // [2] ** [3] = {(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)}
+        let v = eval("[2] ** [3]").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        assert!(approx_arr(&d, &[0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.0, 0.0, 1.0, 1.0, 1.0, 2.0]));
+    }
+
+    #[test]
+    fn tensor_product_empty_array() {
+        // {} ** {1, 2} = {}
+        let mut vars = HashMap::new();
+        vars.insert("empty".to_string(), Value::Array(vec![]));
+        let result = eval_with("empty ** {1, 2}", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[]));
+    }
+
+    #[test]
+    fn tensor_product_chained() {
+        // [2] ** [2] ** [2] = 8 elements
+        let v = eval("[2] ** [2] ** [2]").unwrap();
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 3);
+        // Should have 2*2*2 = 8 tuples, each with 3 elements
+        assert_eq!(d.len(), 24);
+    }
+
+    #[test]
+    fn tensor_product_with_lambda() {
+        // Create tensor product, then apply lambda
+        let mut vars = HashMap::new();
+        let lam = eval("(|(x, y)| x + y)").unwrap();
+        vars.insert("add".to_string(), lam);
+        // {1, 2} ** {10, 20} = {(1,10), (1,20), (2,10), (2,20)}
+        // add on that = {11, 21, 12, 22}
+        let result = eval_with("add({1, 2} ** {10, 20})", &vars).unwrap();
+        assert!(approx_arr(&array(&result), &[11.0, 21.0, 12.0, 22.0]));
+    }
 }

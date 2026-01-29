@@ -22,6 +22,7 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Array indexing: `arr[i]` returns element at index; `arr[lambda]` filters with `(index, value...)` predicate
 - Lambdas: define with `(|x| expr)` or multi-param `(|(x,y)| expr)`, call with `name(arg)`
 - Lambda decomposition: `(|(a, rest)| ...)` binds first element to `a`, remaining to `rest` as tuple
+- Tensor product: `x ** y` creates Cartesian product of arrays with flattened tuples
 
 ## Keybindings
 
@@ -173,4 +174,14 @@ fine_calc
 (|(i,first,rest)| first > 3)
 >> tri[firstGt3]
 {(4, 5, 6), (7, 8, 9)}
+>> {1, 2} ** {10, 20, 30}
+{(1, 10), (1, 20), (1, 30), (2, 10), (2, 20), (2, 30)}
+>> [2] ** [3]
+{(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)}
+>> (1, 2) ** (3, 4)
+(1, 2, 3, 4)
+>> add = (|(x, y)| x + y)
+(|(x,y)| x+y)
+>> add({1, 2} ** {10, 20})
+{11, 21, 12, 22}
 ```

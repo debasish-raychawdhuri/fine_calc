@@ -6,55 +6,122 @@ use value::Value;
 
 lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
 
+/// Try to parse a lambda literal from a string starting at position `start`.
+/// Returns Some((Lambda, end_position)) if successful, None otherwise.
+fn parse_lambda_at(s: &str, start: usize) -> Option<(Value, usize)> {
+    let rest = &s[start..];
+    if !rest.starts_with("(|") {
+        return None;
+    }
+
+    let inner_start = start + 2; // after "(|"
+    let inner = &s[inner_start..];
+
+    // Find the second | that ends params
+    let pipe_pos = inner.find('|')?;
+    let param_part = inner[..pipe_pos].trim();
+
+    // Find matching ) for the lambda - need to track paren depth
+    let body_start = inner_start + pipe_pos + 1;
+    let mut depth = 1; // we're inside one (
+    let mut end_pos = body_start;
+    for (i, c) in s[body_start..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end_pos = body_start + i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if depth != 0 {
+        return None; // unbalanced
+    }
+
+    let body = s[body_start..end_pos].trim();
+    if body.is_empty() {
+        return None;
+    }
+
+    // Parse params
+    let params = if param_part.starts_with('(') && param_part.ends_with(')') {
+        // Multi-param: (x,y,z)
+        let params_str = &param_part[1..param_part.len() - 1];
+        let params: Vec<String> = params_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect();
+        let valid = params.iter().all(|p| {
+            !p.is_empty()
+                && p.chars().all(|c| c.is_alphanumeric() || c == '_')
+                && (p.starts_with('_') || p.chars().next().unwrap().is_alphabetic())
+        });
+        if !valid || params.is_empty() {
+            return None;
+        }
+        params
+    } else {
+        // Single param: x
+        if param_part.is_empty()
+            || !param_part.chars().all(|c| c.is_alphanumeric() || c == '_')
+            || (!param_part.starts_with('_') && !param_part.chars().next().unwrap().is_alphabetic())
+        {
+            return None;
+        }
+        vec![param_part.to_string()]
+    };
+
+    Some((Value::Lambda { params, body: body.to_string() }, end_pos + 1))
+}
+
+/// Extract all lambda literals from input, replacing them with placeholder variables.
+/// Returns (modified_input, map of placeholder -> Lambda).
+fn extract_lambdas(input: &str) -> (String, HashMap<String, Value>) {
+    let mut result = String::new();
+    let mut lambdas = HashMap::new();
+    let mut i = 0;
+    let mut lambda_count = 0;
+
+    while i < input.len() {
+        if input[i..].starts_with("(|") {
+            if let Some((lambda, end)) = parse_lambda_at(input, i) {
+                let placeholder = format!("__lambda{}__", lambda_count);
+                lambda_count += 1;
+                lambdas.insert(placeholder.clone(), lambda);
+                result.push_str(&placeholder);
+                i = end;
+                continue;
+            }
+        }
+        result.push(input[i..].chars().next().unwrap());
+        i += input[i..].chars().next().unwrap().len_utf8();
+    }
+
+    (result, lambdas)
+}
+
 fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Value, String> {
     let input = input.trim();
     if input.is_empty() {
         return Err("Empty expression".to_string());
     }
-    // Detect lambda literal: (|param| body) or (|(x,y)| body)
-    if input.starts_with("(|") && input.ends_with(')') {
-        let inner = &input[2..input.len() - 1]; // strip "(|" and ")"
-        if let Some(pipe_pos) = inner.find('|') {
-            let param_part = inner[..pipe_pos].trim();
-            let body = inner[pipe_pos + 1..].trim();
-            if !body.is_empty() {
-                // Check if it's multi-param: (x,y,z) or single: x
-                if param_part.starts_with('(') && param_part.ends_with(')') {
-                    // Multi-param: (|(x,y)| body)
-                    let params_str = &param_part[1..param_part.len() - 1];
-                    let params: Vec<String> = params_str
-                        .split(',')
-                        .map(|s| s.trim().to_string())
-                        .collect();
-                    let valid = params.iter().all(|p| {
-                        !p.is_empty()
-                            && p.chars().all(|c| c.is_alphanumeric() || c == '_')
-                            && (p.starts_with('_') || p.chars().next().unwrap().is_alphabetic())
-                    });
-                    if valid && !params.is_empty() {
-                        return Ok(Value::Lambda {
-                            params,
-                            body: body.to_string(),
-                        });
-                    }
-                } else {
-                    // Single param: (|x| body)
-                    let param = param_part;
-                    if !param.is_empty()
-                        && param.chars().all(|c| c.is_alphanumeric() || c == '_')
-                        && (param.starts_with('_') || param.chars().next().unwrap().is_alphabetic())
-                    {
-                        return Ok(Value::Lambda {
-                            params: vec![param.to_string()],
-                            body: body.to_string(),
-                        });
-                    }
-                }
-            }
-        }
+
+    // Extract inline lambdas and replace with placeholders
+    let (processed_input, extracted_lambdas) = extract_lambdas(input);
+
+    // Merge extracted lambdas with existing vars
+    let mut merged_vars = vars.clone();
+    for (name, lambda) in extracted_lambdas {
+        merged_vars.insert(name, lambda);
     }
+
     expr::TopExprParser::new()
-        .parse(vars, input)
+        .parse(&merged_vars, &processed_input)
         .map_err(|e| match e {
             lalrpop_util::ParseError::User { error } => error.to_string(),
             other => format!("{}", other),
@@ -1286,5 +1353,62 @@ mod tests {
     fn wrap_line_empty() {
         let lines = wrap_line("", 10);
         assert_eq!(lines, Vec::<String>::new());
+    }
+
+    // Inline lambda tests
+
+    #[test]
+    fn inline_lambda_single_param() {
+        // Single param lambda used in function call (not filter)
+        let mut vars = HashMap::new();
+        vars.insert("sq".to_string(), eval("(|x| x*x)").unwrap());
+        let v = eval_with("sq(5)", &vars).unwrap();
+        assert!(approx(scalar(&v), 25.0));
+    }
+
+    #[test]
+    fn inline_lambda_multi_param() {
+        // Multi-param lambda inline
+        let v = eval("{1, 2, 3, 4, 5}[(|(i,x)| x > 2)]").unwrap();
+        assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
+    }
+
+    #[test]
+    fn inline_lambda_tensor_filter() {
+        // The user's example: ([10]**[10])[(|(i,x,y)| x*y > 10)]
+        let v = eval("([3]**[3])[(|(i,x,y)| x*y > 1)]").unwrap();
+        // 3x3 = pairs (0,0)..(2,2), filter where x*y > 1
+        // (1,2), (2,1), (2,2) have products 2, 2, 4 > 1
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        assert!(approx_arr(&d, &[1.0, 2.0, 2.0, 1.0, 2.0, 2.0]));
+    }
+
+    #[test]
+    fn inline_lambda_as_value() {
+        // Lambda literal evaluates to a lambda value
+        let v = eval("(|x| x + 1)").unwrap();
+        match v {
+            Value::Lambda { params, body } => {
+                assert_eq!(params, vec!["x"]);
+                assert_eq!(body, "x + 1");
+            }
+            _ => panic!("expected lambda"),
+        }
+    }
+
+    #[test]
+    fn user_example_tensor_filter() {
+        // The exact example the user asked about
+        let v = eval("([10]**[10])[(|(i,x,y)|x*y>10)]").unwrap();
+        // Should filter pairs where x*y > 10
+        // Pairs like (2,6), (3,4), (4,3), (6,2), etc.
+        let (w, d) = tuple_array(&v);
+        assert_eq!(w, 2);
+        // Just check that we got some results and they satisfy x*y > 10
+        assert!(d.len() > 0);
+        for chunk in d.chunks(2) {
+            assert!(chunk[0] * chunk[1] > 10.0);
+        }
     }
 }

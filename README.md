@@ -19,9 +19,9 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Tuples: `(a, b, c)` creates a flat tuple; nested tuples flatten automatically; single-element tuples reduce to scalars
 - Tuple arrays: `{(1,2), (3,4)}` or broadcasting `(scalar, array)` creates arrays of tuples
 - Tuple decomposition: `(a, b) = (1, 2, 3)` assigns `a=1`, `b=(2,3)` (last var gets rest)
-- Array indexing: `arr[i]` returns element at index; `arr[lambda]` filters with `(index, value)` predicate
+- Array indexing: `arr[i]` returns element at index; `arr[lambda]` filters with `(index, value...)` predicate
 - Lambdas: define with `(|x| expr)` or multi-param `(|(x,y)| expr)`, call with `name(arg)`
-- Lambda destructuring: multi-param lambdas accept tuples or tuple arrays
+- Lambda decomposition: `(|(a, rest)| ...)` binds first element to `a`, remaining to `rest` as tuple
 
 ## Keybindings
 
@@ -159,4 +159,18 @@ fine_calc
 (|(i,x,y)| x > 1)
 >> ta[first_gt_1]
 {(2, 20), (3, 30)}
+>> tri = {(1, 2, 3), (4, 5, 6), (7, 8, 9)}
+{(1, 2, 3), (4, 5, 6), (7, 8, 9)}
+>> getFirst = (|(a, rest)| a)
+(|(a,rest)| a)
+>> getFirst({(1, 2, 3), (4, 5, 6)})
+{1, 4}
+>> getRest = (|(a, rest)| rest)
+(|(a,rest)| rest)
+>> getRest((1, 2, 3))
+(2, 3)
+>> firstGt3 = (|(i, first, rest)| first > 3)
+(|(i,first,rest)| first > 3)
+>> tri[firstGt3]
+{(4, 5, 6), (7, 8, 9)}
 ```

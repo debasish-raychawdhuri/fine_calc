@@ -169,37 +169,48 @@ fn main() {
             mv(y, 0);
             addch(ACS_VLINE());
 
-            // Fill with dark grey background
-            attron(COLOR_PAIR(4));
-            for _ in 0..inner_w {
-                addch(' ' as u32);
-            }
-            attroff(COLOR_PAIR(4));
-
-            addch(ACS_VLINE());
-
             let idx = scroll_offset + row;
-            if idx >= history.len() {
-                continue;
-            }
-            let line = &history[idx];
-            mv(y, 1);
-            if line.starts_with("Error:") {
-                attron(COLOR_PAIR(2));
-                addstr(line);
-                attroff(COLOR_PAIR(2));
-            } else if line.starts_with(">> ") {
+            let (line_content, color_pair, line_len) = if idx < history.len() {
+                let line = &history[idx];
+                if line.starts_with("Error:") {
+                    (line.as_str(), 2, line.chars().count())
+                } else if line.starts_with(">> ") {
+                    // Prompt lines handled specially below
+                    ("", 0, 0)
+                } else {
+                    (line.as_str(), 1, line.chars().count())
+                }
+            } else {
+                ("", 4, 0)
+            };
+
+            if idx < history.len() && history[idx].starts_with(">> ") {
+                // Prompt line: ">> " in cyan, rest in white, all on grey background
+                let line = &history[idx];
                 attron(COLOR_PAIR(5));
                 addstr(">> ");
                 attroff(COLOR_PAIR(5));
                 attron(COLOR_PAIR(4));
-                addstr(&line[3..]);
+                let rest = &line[3..];
+                addstr(rest);
+                let used = 3 + rest.chars().count();
+                // Pad remaining with spaces
+                for _ in used..inner_w {
+                    addch(' ' as u32);
+                }
                 attroff(COLOR_PAIR(4));
             } else {
-                attron(COLOR_PAIR(1));
-                addstr(line);
-                attroff(COLOR_PAIR(1));
+                // Regular line: error, result, or empty
+                attron(COLOR_PAIR(color_pair));
+                addstr(line_content);
+                // Pad remaining with spaces to maintain background
+                for _ in line_len..inner_w {
+                    addch(' ' as u32);
+                }
+                attroff(COLOR_PAIR(color_pair));
             }
+
+            addch(ACS_VLINE());
         }
 
         // Middle separator: ├───┤

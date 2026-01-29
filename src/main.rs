@@ -123,6 +123,31 @@ fn parse_assignment(trimmed: &str) -> (Option<Assignment>, &str) {
     (None, trimmed)
 }
 
+/// Wrap a string into multiple lines of at most `width` characters.
+/// Returns a Vec of lines that fit within the width.
+fn wrap_line(s: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![s.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut remaining = s;
+    while !remaining.is_empty() {
+        if remaining.len() <= width {
+            lines.push(remaining.to_string());
+            break;
+        }
+        // Take up to width characters
+        let split_at = remaining.char_indices()
+            .take(width)
+            .last()
+            .map(|(i, c)| i + c.len_utf8())
+            .unwrap_or(remaining.len());
+        lines.push(remaining[..split_at].to_string());
+        remaining = &remaining[split_at..];
+    }
+    lines
+}
+
 fn main() {
     initscr();
     cbreak();
@@ -318,8 +343,16 @@ fn main() {
                     let result = evaluate_expression(expr_str, &variables);
                     match result {
                         Ok(res) => {
-                            history.push(format!(">> {}", input));
-                            history.push(format!("{}", &res));
+                            // Wrap input line (account for ">> " prefix)
+                            let input_line = format!(">> {}", input);
+                            for line in wrap_line(&input_line, inner_w) {
+                                history.push(line);
+                            }
+                            // Wrap result output
+                            let result_str = format!("{}", &res);
+                            for line in wrap_line(&result_str, inner_w) {
+                                history.push(line);
+                            }
                             match assignment {
                                 Some(Assignment::Single(name)) => {
                                     variables.insert(name, res);
@@ -332,7 +365,9 @@ fn main() {
                                             }
                                         }
                                         Err(e) => {
-                                            history.push(format!("Error: {}", e));
+                                            for line in wrap_line(&format!("Error: {}", e), inner_w) {
+                                                history.push(line);
+                                            }
                                         }
                                     }
                                 }
@@ -340,8 +375,13 @@ fn main() {
                             }
                         }
                         Err(e) => {
-                            history.push(format!(">> {}", input));
-                            history.push(format!("Error: {}", e));
+                            let input_line = format!(">> {}", input);
+                            for line in wrap_line(&input_line, inner_w) {
+                                history.push(line);
+                            }
+                            for line in wrap_line(&format!("Error: {}", e), inner_w) {
+                                history.push(line);
+                            }
                         }
                     }
                     input_history.push(input.clone());
@@ -1206,5 +1246,45 @@ mod tests {
         // add on that = {11, 21, 12, 22}
         let result = eval_with("add({1, 2} ** {10, 20})", &vars).unwrap();
         assert!(approx_arr(&array(&result), &[11.0, 21.0, 12.0, 22.0]));
+    }
+
+    // Line wrapping tests
+
+    #[test]
+    fn wrap_line_short() {
+        // Short line that fits
+        let lines = wrap_line("hello", 10);
+        assert_eq!(lines, vec!["hello"]);
+    }
+
+    #[test]
+    fn wrap_line_exact() {
+        // Line exactly at width
+        let lines = wrap_line("hello", 5);
+        assert_eq!(lines, vec!["hello"]);
+    }
+
+    #[test]
+    fn wrap_line_long() {
+        // Line needs wrapping
+        let lines = wrap_line("hello world", 5);
+        assert_eq!(lines, vec!["hello", " worl", "d"]);
+    }
+
+    #[test]
+    fn wrap_line_long_result() {
+        // Simulating a long result like a tensor product
+        let long = "{(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)}";
+        let lines = wrap_line(long, 20);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "{(0, 0), (0, 1), (0,");
+        assert_eq!(lines[1], " 2), (1, 0), (1, 1),");
+        assert_eq!(lines[2], " (1, 2)}");
+    }
+
+    #[test]
+    fn wrap_line_empty() {
+        let lines = wrap_line("", 10);
+        assert_eq!(lines, Vec::<String>::new());
     }
 }

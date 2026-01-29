@@ -1516,4 +1516,82 @@ mod tests {
         let result = eval_with("triangular(5)", &vars).unwrap();
         assert!(approx(scalar(&result), 15.0));
     }
+
+    // Fold/reduce tests
+
+    #[test]
+    fn fold_sum() {
+        // Sum of {1,2,3,4,5} = 15
+        let v = eval("{1,2,3,4,5} @ 0 {|a,b|(a+b)}").unwrap();
+        assert!(approx(scalar(&v), 15.0));
+    }
+
+    #[test]
+    fn fold_product() {
+        // Product of {1,2,3,4} = 24
+        let v = eval("{1,2,3,4} @ 1 {|a,b|(a*b)}").unwrap();
+        assert!(approx(scalar(&v), 24.0));
+    }
+
+    #[test]
+    fn fold_max() {
+        // Max of {3,1,4,1,5,9,2,6} starting from 0
+        let v = eval("{3,1,4,1,5,9,2,6} @ 0 {|max,x|(max * (max > x) + x * (x >= max))}").unwrap();
+        assert!(approx(scalar(&v), 9.0));
+    }
+
+    #[test]
+    fn fold_count() {
+        // Count elements > 3
+        let v = eval("{1,2,3,4,5,6} @ 0 {|cnt,x|(cnt + (x > 3))}").unwrap();
+        assert!(approx(scalar(&v), 3.0)); // 4, 5, 6
+    }
+
+    #[test]
+    fn fold_range_sum() {
+        // Sum of [10] = 0+1+2+...+9 = 45
+        let v = eval("[10] @ 0 {|a,b|(a+b)}").unwrap();
+        assert!(approx(scalar(&v), 45.0));
+    }
+
+    #[test]
+    fn fold_factorial() {
+        // 5! = 1*2*3*4*5 = 120 using [5]+1 = {1,2,3,4,5}
+        // We need to use range and add 1 to each
+        let v = eval("([5]+1) @ 1 {|a,b|(a*b)}").unwrap();
+        assert!(approx(scalar(&v), 120.0));
+    }
+
+    #[test]
+    fn fold_with_tuple_accumulator() {
+        // Keep running sum and count: start with (0, 0), return (sum, count)
+        // {1,2,3} -> (0,0) -> (1,1) -> (3,2) -> (6,3)
+        // Need double parens: outer for lambda body, inner for tuple
+        let v = eval("{1,2,3} @ (0,0) {|sum,cnt,x|((sum+x, cnt+1))}").unwrap();
+        assert!(approx_arr(&tuple(&v), &[6.0, 3.0]));
+    }
+
+    #[test]
+    fn fold_tuple_array() {
+        // Sum x*y for each tuple in tuple array
+        // {(1,2), (3,4), (5,6)} -> 1*2 + 3*4 + 5*6 = 2 + 12 + 30 = 44
+        let v = eval("{(1,2), (3,4), (5,6)} @ 0 {|acc,x,y|(acc + x*y)}").unwrap();
+        assert!(approx(scalar(&v), 44.0));
+    }
+
+    #[test]
+    fn fold_empty_array() {
+        // Fold on empty array returns init
+        let mut vars = HashMap::new();
+        vars.insert("empty".to_string(), Value::Array(vec![]));
+        let v = eval_with("empty @ 42 {|a,b|(a+b)}", &vars).unwrap();
+        assert!(approx(scalar(&v), 42.0));
+    }
+
+    #[test]
+    fn fold_single_element() {
+        // Fold on single element: init combined with that element
+        let v = eval("{5} @ 10 {|a,b|(a+b)}").unwrap();
+        assert!(approx(scalar(&v), 15.0));
+    }
 }

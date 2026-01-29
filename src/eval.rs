@@ -166,6 +166,19 @@ pub fn eval(expr: &Expr, vars: &HashMap<String, Value>) -> Result<Value, String>
                 body: body.clone(),
             })
         }
+
+        Expr::Fold { array, init, lambda } => {
+            let arr_val = eval(array, vars)?;
+            let init_val = eval(init, vars)?;
+            let lambda_val = eval(lambda, vars)?;
+
+            match lambda_val {
+                Value::Lambda { params, body } => {
+                    fold_with_lambda(&arr_val, init_val, &params, &body, vars)
+                }
+                _ => Err("Fold requires a lambda".to_string())
+            }
+        }
     }
 }
 
@@ -278,5 +291,83 @@ fn filter_with_lambda(
             }
         }
         _ => Err("Can only filter arrays or tuple arrays".to_string())
+    }
+}
+
+/// Fold/reduce an array with a lambda: array(init){|acc,elem|(body)}
+fn fold_with_lambda(
+    arr: &Value,
+    init: Value,
+    params: &[String],
+    body: &Expr,
+    vars: &HashMap<String, Value>
+) -> Result<Value, String> {
+    match arr {
+        Value::Array(elements) => {
+            let mut acc = init;
+            for &elem in elements {
+                // Build tuple (acc, elem) for lambda binding
+                let arg = build_fold_arg(&acc, Value::Scalar(elem))?;
+                acc = call_lambda_for_fold(params, body, arg, vars)?;
+            }
+            Ok(acc)
+        }
+        Value::TupleArray { width, data } => {
+            let count = data.len() / width;
+            let mut acc = init;
+            for i in 0..count {
+                let elem = if *width == 1 {
+                    Value::Scalar(data[i])
+                } else {
+                    Value::Tuple(data[i * width..(i + 1) * width].to_vec())
+                };
+                let arg = build_fold_arg(&acc, elem)?;
+                acc = call_lambda_for_fold(params, body, arg, vars)?;
+            }
+            Ok(acc)
+        }
+        _ => Err("Fold requires an array or tuple array".to_string())
+    }
+}
+
+/// Build the argument tuple for fold lambda by flattening (acc, elem)
+fn build_fold_arg(acc: &Value, elem: Value) -> Result<Value, String> {
+    let mut flat = Vec::new();
+
+    // Flatten acc
+    match acc {
+        Value::Scalar(v) => flat.push(*v),
+        Value::Tuple(t) => flat.extend(t),
+        _ => return Err("Accumulator must be scalar or tuple".to_string()),
+    }
+
+    // Flatten elem
+    match elem {
+        Value::Scalar(v) => flat.push(v),
+        Value::Tuple(t) => flat.extend(t),
+        _ => return Err("Array element must be scalar or tuple".to_string()),
+    }
+
+    Ok(Value::Tuple(flat))
+}
+
+/// Call lambda for fold - always uses tuple decomposition
+fn call_lambda_for_fold(
+    params: &[String],
+    body: &Expr,
+    arg: Value,
+    vars: &HashMap<String, Value>
+) -> Result<Value, String> {
+    match arg {
+        Value::Tuple(ref t) => {
+            let bindings = Value::decompose_elements(t, params.len())
+                .map_err(|e| e.to_string())?;
+            let mut inner = vars.clone();
+            for (p, v) in params.iter().zip(bindings) {
+                inner.insert(p.clone(), v);
+            }
+            eval(body, &inner)
+        }
+        _ => Err("Fold argument must be tuple".to_string())
     }
 }

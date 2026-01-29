@@ -52,6 +52,10 @@ Unary: Expr = {
 
 Postfix: Expr = {
     <base:Postfix> "[" <idx:TopExpr> "]" => Expr::Index(Box::new(base), Box::new(idx)),
+    // Fold: array @ init { lambda }
+    <arr:Postfix> "@" <init:Unary> r"\{" <lam:TopExpr> r"\}" => {
+        Expr::Fold { array: Box::new(arr), init: Box::new(init), lambda: Box::new(lam) }
+    },
     Atom,
 };
 

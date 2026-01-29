@@ -41,6 +41,8 @@ pub enum Expr {
     Index(Box<Expr>, Box<Expr>),
     /// Lambda definition: |x| body or |(x,y)| body
     Lambda { params: Vec<String>, body: Box<Expr> },
+    /// Fold/reduce: array(init){lambda}
+    Fold { array: Box<Expr>, init: Box<Expr>, lambda: Box<Expr> },
 }
 
 impl fmt::Display for Expr {
@@ -100,6 +102,9 @@ impl fmt::Display for Expr {
                 } else {
                     write!(f, "|({})| {}", params.join(", "), body)
                 }
+            }
+            Expr::Fold { array, init, lambda } => {
+                write!(f, "{}({}){{{}}}", array, init, lambda)
             }
         }
     }

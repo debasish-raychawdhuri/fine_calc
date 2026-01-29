@@ -23,6 +23,7 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Lambdas: define with `|x|(expr)` or multi-param `|x,y|(expr)`, call with `name(arg)`
 - Lambda decomposition: `|a, rest|(...)` binds first element to `a`, remaining to `rest` as tuple
 - Tensor product: `x ** y` creates Cartesian product of arrays with flattened tuples
+- Fold/reduce: `array @ init { |acc,elem|(body) }` reduces array to single value; tuples flatten, decomposition works normally
 
 ## Keybindings
 
@@ -184,4 +185,16 @@ fine_calc
 |x, y|((x + y))
 >> add({1, 2} ** {10, 20})
 {11, 21, 12, 22}
+>> {1, 2, 3, 4, 5} @ 0 {|a,b|(a+b)}
+15
+>> {1, 2, 3, 4, 5} @ 1 {|a,b|(a*b)}
+120
+>> {3, 1, 4, 1, 5} @ 0 {|m,x|(m + (x>m)*(x-m))}
+5
+>> [5] @ 1 {|acc,n|(acc * (n+1))}
+120
+>> {(1, 2), (3, 4), (5, 6)} @ 0 {|sum,x,y|(sum + x*y)}
+44
+>> {1, 2, 3} @ (0, 0) {|sum,cnt,x|((sum+x, cnt+1))}
+(6, 3)
 ```

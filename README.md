@@ -16,8 +16,10 @@ A terminal-based calculator with a TUI interface, built in Rust using ncurses.
 - Variables: assign with `x = expr`, use in later expressions
 - Nested parentheses support
 - Arrays: range `[n]`, literals `{x1, x2, ...}`, element-wise operations with broadcasting (including comparisons and booleans)
-- Tuples: `(a, b, c)` creates a flat tuple; nested tuples flatten automatically
+- Tuples: `(a, b, c)` creates a flat tuple; nested tuples flatten automatically; single-element tuples reduce to scalars
 - Tuple arrays: `{(1,2), (3,4)}` or broadcasting `(scalar, array)` creates arrays of tuples
+- Tuple decomposition: `(a, b) = (1, 2, 3)` assigns `a=1`, `b=(2,3)` (last var gets rest)
+- Array indexing: `arr[i]` returns element at index; `arr[lambda]` filters with `(index, value)` predicate
 - Lambdas: define with `(|x| expr)` or multi-param `(|(x,y)| expr)`, call with `name(arg)`
 - Lambda destructuring: multi-param lambdas accept tuples or tuple arrays
 
@@ -135,4 +137,26 @@ fine_calc
 (|(a,b)| a*b)
 >> mul((2, {1, 2, 3}))
 {2, 4, 6}
+>> arr = {10, 20, 30, 40, 50}
+{10, 20, 30, 40, 50}
+>> arr[2]
+30
+>> gt20 = (|(i,x)| x > 20)
+(|(i,x)| x > 20)
+>> arr[gt20]
+{30, 40, 50}
+>> [10][gt20]
+{6, 7, 8, 9}
+>> evenIdx = (|(i,x)| floor(i/2)*2 == i)
+(|(i,x)| floor(i/2)*2 == i)
+>> arr[evenIdx]
+{10, 30, 50}
+>> ta = {(1, 10), (2, 20), (3, 30)}
+{(1, 10), (2, 20), (3, 30)}
+>> ta[0]
+(1, 10)
+>> first_gt_1 = (|(i,x,y)| x > 1)
+(|(i,x,y)| x > 1)
+>> ta[first_gt_1]
+{(2, 20), (3, 30)}
 ```

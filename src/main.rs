@@ -4,22 +4,42 @@ use std::collections::HashMap;
 mod ast;
 mod value;
 mod eval;
+mod error;
 
+use ast::Span;
 use value::Value;
 use eval::eval;
+use error::{EvalError, format_error_indicator};
 
 lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
 
-fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Value, String> {
+fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Value, EvalError> {
     let input = input.trim();
     if input.is_empty() {
-        return Err("Empty expression".to_string());
+        return Err(EvalError::new("Empty expression"));
     }
 
     // Parse to AST
     let ast = expr::TopExprParser::new()
         .parse(input)
-        .map_err(|e| format!("{}", e))?;
+        .map_err(|e| {
+            // Extract span from parse error if possible
+            match &e {
+                lalrpop_util::ParseError::InvalidToken { location } => {
+                    EvalError::with_span(format!("{}", e), Span::new(*location, location + 1))
+                }
+                lalrpop_util::ParseError::UnrecognizedToken { token: (start, _, end), .. } => {
+                    EvalError::with_span(format!("{}", e), Span::new(*start, *end))
+                }
+                lalrpop_util::ParseError::ExtraToken { token: (start, _, end) } => {
+                    EvalError::with_span(format!("{}", e), Span::new(*start, *end))
+                }
+                lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
+                    EvalError::with_span(format!("{}", e), Span::new(*location, location + 1))
+                }
+                _ => EvalError::new(format!("{}", e))
+            }
+        })?;
 
     // Evaluate AST
     eval(&ast, vars)
@@ -177,6 +197,9 @@ fn main() {
                 } else if line.starts_with(">> ") {
                     // Prompt lines handled specially below
                     ("", 0, 0)
+                } else if line.starts_with("   ") && line.chars().skip(3).all(|c| c == '_' || c == '^' || c == '-') {
+                    // Error indicator line - use red color
+                    (line.as_str(), 2, line.chars().count())
                 } else {
                     (line.as_str(), 1, line.chars().count())
                 }
@@ -354,7 +377,23 @@ fn main() {
                             for line in wrap_line(&input_line, inner_w) {
                                 history.push(line);
                             }
-                            for line in wrap_line(&format!("Error: {}", e), inner_w) {
+                            // Add indicator line if we have span info
+                            if let Some(span) = e.span {
+                                // Calculate offset: expr_str starts at this position within input
+                                let trim_offset = input.find(trimmed).unwrap_or(0);
+                                let expr_offset = if assignment.is_some() {
+                                    // There was an assignment, find where expr_str starts in trimmed
+                                    trim_offset + trimmed.find(expr_str).unwrap_or(0)
+                                } else {
+                                    trim_offset
+                                };
+                                let adjusted_span = Span::new(span.start + expr_offset, span.end + expr_offset);
+                                let indicator = format!("   {}", format_error_indicator(&input, adjusted_span));
+                                for line in wrap_line(&indicator, inner_w) {
+                                    history.push(line);
+                                }
+                            }
+                            for line in wrap_line(&format!("Error: {}", e.message), inner_w) {
                                 history.push(line);
                             }
                         }
@@ -384,11 +423,11 @@ mod tests {
     use std::collections::HashMap;
 
     fn eval(expr: &str) -> Result<Value, String> {
-        evaluate_expression(expr, &HashMap::new())
+        evaluate_expression(expr, &HashMap::new()).map_err(|e| e.message)
     }
 
     fn eval_with(expr: &str, vars: &HashMap<String, Value>) -> Result<Value, String> {
-        evaluate_expression(expr, vars)
+        evaluate_expression(expr, vars).map_err(|e| e.message)
     }
 
     fn scalar(v: &Value) -> f64 {

@@ -1,60 +1,94 @@
-use crate::ast::{Expr, BinOp, UnaryOp};
+use crate::ast::{Expr, BinOp, UnaryOp, Span, Spanned, SpannedExpr};
 
 grammar;
 
-pub TopExpr: Expr = {
-    <l:TopExpr> "||" <r:AndExpr> => Expr::BinOp(Box::new(l), BinOp::Or, Box::new(r)),
+pub TopExpr: SpannedExpr = {
+    <l:@L> <left:TopExpr> "||" <right:AndExpr> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Or, Box::new(right)), Span::new(l, r))
+    },
     AndExpr,
 };
 
-AndExpr: Expr = {
-    <l:AndExpr> "&&" <r:CmpEq> => Expr::BinOp(Box::new(l), BinOp::And, Box::new(r)),
+AndExpr: SpannedExpr = {
+    <l:@L> <left:AndExpr> "&&" <right:CmpEq> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::And, Box::new(right)), Span::new(l, r))
+    },
     CmpEq,
 };
 
-CmpEq: Expr = {
-    <l:CmpEq> "==" <r:CmpRel> => Expr::BinOp(Box::new(l), BinOp::Eq, Box::new(r)),
-    <l:CmpEq> "!=" <r:CmpRel> => Expr::BinOp(Box::new(l), BinOp::Ne, Box::new(r)),
+CmpEq: SpannedExpr = {
+    <l:@L> <left:CmpEq> "==" <right:CmpRel> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Eq, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:CmpEq> "!=" <right:CmpRel> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Ne, Box::new(right)), Span::new(l, r))
+    },
     CmpRel,
 };
 
-CmpRel: Expr = {
-    <l:CmpRel> ">=" <r:Additive> => Expr::BinOp(Box::new(l), BinOp::Ge, Box::new(r)),
-    <l:CmpRel> "<=" <r:Additive> => Expr::BinOp(Box::new(l), BinOp::Le, Box::new(r)),
-    <l:CmpRel> ">" <r:Additive> => Expr::BinOp(Box::new(l), BinOp::Gt, Box::new(r)),
-    <l:CmpRel> "<" <r:Additive> => Expr::BinOp(Box::new(l), BinOp::Lt, Box::new(r)),
+CmpRel: SpannedExpr = {
+    <l:@L> <left:CmpRel> ">=" <right:Additive> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Ge, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:CmpRel> "<=" <right:Additive> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Le, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:CmpRel> ">" <right:Additive> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Gt, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:CmpRel> "<" <right:Additive> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Lt, Box::new(right)), Span::new(l, r))
+    },
     Additive,
 };
 
-Additive: Expr = {
-    <l:Additive> "+" <r:Multiplicative> => Expr::BinOp(Box::new(l), BinOp::Add, Box::new(r)),
-    <l:Additive> "-" <r:Multiplicative> => Expr::BinOp(Box::new(l), BinOp::Sub, Box::new(r)),
+Additive: SpannedExpr = {
+    <l:@L> <left:Additive> "+" <right:Multiplicative> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Add, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:Additive> "-" <right:Multiplicative> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Sub, Box::new(right)), Span::new(l, r))
+    },
     Multiplicative,
 };
 
-Multiplicative: Expr = {
-    <l:Multiplicative> "**" <r:Power> => Expr::BinOp(Box::new(l), BinOp::TensorProduct, Box::new(r)),
-    <l:Multiplicative> "*" <r:Power> => Expr::BinOp(Box::new(l), BinOp::Mul, Box::new(r)),
-    <l:Multiplicative> "/" <r:Power> => Expr::BinOp(Box::new(l), BinOp::Div, Box::new(r)),
+Multiplicative: SpannedExpr = {
+    <l:@L> <left:Multiplicative> "**" <right:Power> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::TensorProduct, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:Multiplicative> "*" <right:Power> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Mul, Box::new(right)), Span::new(l, r))
+    },
+    <l:@L> <left:Multiplicative> "/" <right:Power> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(left), BinOp::Div, Box::new(right)), Span::new(l, r))
+    },
     Power,
 };
 
-Power: Expr = {
-    <base:Unary> "^" <exp:Power> => Expr::BinOp(Box::new(base), BinOp::Pow, Box::new(exp)),
+Power: SpannedExpr = {
+    <l:@L> <base:Unary> "^" <exp:Power> <r:@R> => {
+        Spanned::new(Expr::BinOp(Box::new(base), BinOp::Pow, Box::new(exp)), Span::new(l, r))
+    },
     Unary,
 };
 
-Unary: Expr = {
-    "-" <u:Unary> => Expr::UnaryOp(UnaryOp::Neg, Box::new(u)),
-    "!" <u:Unary> => Expr::UnaryOp(UnaryOp::Not, Box::new(u)),
+Unary: SpannedExpr = {
+    <l:@L> "-" <u:Unary> <r:@R> => {
+        Spanned::new(Expr::UnaryOp(UnaryOp::Neg, Box::new(u)), Span::new(l, r))
+    },
+    <l:@L> "!" <u:Unary> <r:@R> => {
+        Spanned::new(Expr::UnaryOp(UnaryOp::Not, Box::new(u)), Span::new(l, r))
+    },
     Postfix,
 };
 
-Postfix: Expr = {
-    <base:Postfix> "[" <idx:TopExpr> "]" => Expr::Index(Box::new(base), Box::new(idx)),
+Postfix: SpannedExpr = {
+    <l:@L> <base:Postfix> "[" <idx:TopExpr> "]" <r:@R> => {
+        Spanned::new(Expr::Index(Box::new(base), Box::new(idx)), Span::new(l, r))
+    },
     // Fold: array @ init { lambda }
-    <arr:Postfix> "@" <init:Unary> r"\{" <lam:TopExpr> r"\}" => {
-        Expr::Fold { array: Box::new(arr), init: Box::new(init), lambda: Box::new(lam) }
+    <l:@L> <arr:Postfix> "@" <init:Unary> r"\{" <lam:TopExpr> r"\}" <r:@R> => {
+        Spanned::new(Expr::Fold { array: Box::new(arr), init: Box::new(init), lambda: Box::new(lam) }, Span::new(l, r))
     },
     Atom,
 };
@@ -73,46 +107,54 @@ CommaSep<T>: Vec<T> = {
     }
 };
 
-Atom: Expr = {
+Atom: SpannedExpr = {
     Num,
     // Lambda: |x|(body) - single param
-    "|" <p:Ident> "|" "(" <body:TopExpr> ")" => {
-        Expr::Lambda { params: vec![p.to_string()], body: Box::new(body) }
+    <l:@L> "|" <p:Ident> "|" "(" <body:TopExpr> ")" <r:@R> => {
+        Spanned::new(Expr::Lambda { params: vec![p.to_string()], body: Box::new(body) }, Span::new(l, r))
     },
     // Lambda: |x,y|(body) - multi param (2+)
-    "|" <first:Ident> "," <rest:Comma<Ident>> "|" "(" <body:TopExpr> ")" => {
+    <l:@L> "|" <first:Ident> "," <rest:Comma<Ident>> "|" "(" <body:TopExpr> ")" <r:@R> => {
         let mut params = vec![first.to_string()];
         params.extend(rest.iter().map(|s| s.to_string()));
-        Expr::Lambda { params, body: Box::new(body) }
+        Spanned::new(Expr::Lambda { params, body: Box::new(body) }, Span::new(l, r))
     },
     // Tuple literal: (a, b) or (a, b, c, ...)
-    "(" <first:TopExpr> "," <rest:Comma<TopExpr>> ")" => {
+    <l:@L> "(" <first:TopExpr> "," <rest:Comma<TopExpr>> ")" <r:@R> => {
         let mut elems = vec![first];
         elems.extend(rest);
-        Expr::Tuple(elems)
+        Spanned::new(Expr::Tuple(elems), Span::new(l, r))
     },
-    // Grouping parentheses (single expression)
-    "(" <TopExpr> ")",
+    // Grouping parentheses (single expression) - pass through with preserved span
+    "(" <e:TopExpr> ")" => e,
     // Range: [n] creates array 0..n
-    "[" <e:TopExpr> "]" => Expr::Range(Box::new(e)),
+    <l:@L> "[" <e:TopExpr> "]" <r:@R> => {
+        Spanned::new(Expr::Range(Box::new(e)), Span::new(l, r))
+    },
     // Array literal: {1, 2, 3}
-    r"\{" <elems:Comma<TopExpr>> r"\}" => Expr::Array(elems),
+    <l:@L> r"\{" <elems:Comma<TopExpr>> r"\}" <r:@R> => {
+        Spanned::new(Expr::Array(elems), Span::new(l, r))
+    },
     // Builtin function call or user function call
-    <name:Ident> "(" <arg:TopExpr> ")" => {
+    <l:@L> <name:Ident> "(" <arg:TopExpr> ")" <r:@R> => {
         let builtins = ["sin", "cos", "tan", "asin", "acos", "atan",
                         "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
                         "sqrt", "abs", "ln", "log2", "log10", "exp",
                         "floor", "ceil", "round"];
         if builtins.contains(&name) {
-            Expr::BuiltinCall(name.to_string(), Box::new(arg))
+            Spanned::new(Expr::BuiltinCall(name.to_string(), Box::new(arg)), Span::new(l, r))
         } else {
-            Expr::Call(name.to_string(), Box::new(arg))
+            Spanned::new(Expr::Call(name.to_string(), Box::new(arg)), Span::new(l, r))
         }
     },
     // Variable reference
-    <name:Ident> => Expr::Ident(name.to_string()),
+    <l:@L> <name:Ident> <r:@R> => {
+        Spanned::new(Expr::Ident(name.to_string()), Span::new(l, r))
+    },
 };
 
-Num: Expr = <s:r"[0-9]+(\.[0-9]+)?"> => Expr::Scalar(s.parse().unwrap());
+Num: SpannedExpr = <l:@L> <s:r"[0-9]+(\.[0-9]+)?"> <r:@R> => {
+    Spanned::new(Expr::Scalar(s.parse().unwrap()), Span::new(l, r))
+};
 
 Ident: &'input str = <s:r"[a-zA-Z_][a-zA-Z0-9_]*"> => s;

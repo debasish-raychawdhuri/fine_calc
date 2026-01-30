@@ -1,5 +1,42 @@
 use std::fmt;
 
+/// Source location span
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Span {
+    pub fn new(start: usize, end: usize) -> Self {
+        Span { start, end }
+    }
+
+    /// Merge two spans, taking the leftmost start and rightmost end
+    pub fn merge(self, other: Span) -> Span {
+        Span {
+            start: self.start.min(other.start),
+            end: self.end.max(other.end),
+        }
+    }
+}
+
+/// A value with source location information
+#[derive(Debug, Clone)]
+pub struct Spanned<T> {
+    pub node: T,
+    pub span: Span,
+}
+
+impl<T> Spanned<T> {
+    pub fn new(node: T, span: Span) -> Self {
+        Spanned { node, span }
+    }
+}
+
+/// Type alias for spanned expressions
+pub type SpannedExpr = Spanned<Expr>;
+
 /// Binary operators
 #[derive(Debug, Clone)]
 pub enum BinOp {
@@ -24,25 +61,31 @@ pub enum Expr {
     /// Variable reference
     Ident(String),
     /// Binary operation
-    BinOp(Box<Expr>, BinOp, Box<Expr>),
+    BinOp(Box<SpannedExpr>, BinOp, Box<SpannedExpr>),
     /// Unary operation
-    UnaryOp(UnaryOp, Box<Expr>),
+    UnaryOp(UnaryOp, Box<SpannedExpr>),
     /// Built-in function call: sin, cos, etc.
-    BuiltinCall(String, Box<Expr>),
+    BuiltinCall(String, Box<SpannedExpr>),
     /// User-defined function/lambda call
-    Call(String, Box<Expr>),
+    Call(String, Box<SpannedExpr>),
     /// Array literal: {1, 2, 3}
-    Array(Vec<Expr>),
+    Array(Vec<SpannedExpr>),
     /// Tuple literal: (1, 2, 3)
-    Tuple(Vec<Expr>),
+    Tuple(Vec<SpannedExpr>),
     /// Range: [n]
-    Range(Box<Expr>),
+    Range(Box<SpannedExpr>),
     /// Indexing/filtering: arr[idx] or arr[lambda]
-    Index(Box<Expr>, Box<Expr>),
+    Index(Box<SpannedExpr>, Box<SpannedExpr>),
     /// Lambda definition: |x| body or |(x,y)| body
-    Lambda { params: Vec<String>, body: Box<Expr> },
+    Lambda { params: Vec<String>, body: Box<SpannedExpr> },
     /// Fold/reduce: array(init){lambda}
-    Fold { array: Box<Expr>, init: Box<Expr>, lambda: Box<Expr> },
+    Fold { array: Box<SpannedExpr>, init: Box<SpannedExpr>, lambda: Box<SpannedExpr> },
+}
+
+impl fmt::Display for SpannedExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.node)
+    }
 }
 
 impl fmt::Display for Expr {

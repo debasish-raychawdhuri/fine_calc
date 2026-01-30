@@ -2,16 +2,19 @@ use ncurses::*;
 use std::collections::HashMap;
 
 mod ast;
-mod value;
-mod eval;
 mod error;
+mod eval;
+mod value;
 
 use ast::Span;
-use value::Value;
-use eval::eval;
 use error::{EvalError, format_error_indicator};
+use eval::eval;
+use value::Value;
 
-lalrpop_util::lalrpop_mod!(#[allow(clippy::all)] expr);
+lalrpop_util::lalrpop_mod!(
+    #[allow(clippy::all)]
+    expr
+);
 
 fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Value, EvalError> {
     let input = input.trim();
@@ -20,26 +23,25 @@ fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Val
     }
 
     // Parse to AST
-    let ast = expr::TopExprParser::new()
-        .parse(input)
-        .map_err(|e| {
-            // Extract span from parse error if possible
-            match &e {
-                lalrpop_util::ParseError::InvalidToken { location } => {
-                    EvalError::with_span(format!("{}", e), Span::new(*location, location + 1))
-                }
-                lalrpop_util::ParseError::UnrecognizedToken { token: (start, _, end), .. } => {
-                    EvalError::with_span(format!("{}", e), Span::new(*start, *end))
-                }
-                lalrpop_util::ParseError::ExtraToken { token: (start, _, end) } => {
-                    EvalError::with_span(format!("{}", e), Span::new(*start, *end))
-                }
-                lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
-                    EvalError::with_span(format!("{}", e), Span::new(*location, location + 1))
-                }
-                _ => EvalError::new(format!("{}", e))
+    let ast = expr::TopExprParser::new().parse(input).map_err(|e| {
+        // Extract span from parse error if possible
+        match &e {
+            lalrpop_util::ParseError::InvalidToken { location } => {
+                EvalError::with_span(format!("{}", e), Span::new(*location, location + 1))
             }
-        })?;
+            lalrpop_util::ParseError::UnrecognizedToken {
+                token: (start, _, end),
+                ..
+            } => EvalError::with_span(format!("{}", e), Span::new(*start, *end)),
+            lalrpop_util::ParseError::ExtraToken {
+                token: (start, _, end),
+            } => EvalError::with_span(format!("{}", e), Span::new(*start, *end)),
+            lalrpop_util::ParseError::UnrecognizedEof { location, .. } => {
+                EvalError::with_span(format!("{}", e), Span::new(*location, location + 1))
+            }
+            _ => EvalError::new(format!("{}", e)),
+        }
+    })?;
 
     // Evaluate AST
     eval(&ast, vars)
@@ -121,7 +123,8 @@ fn wrap_line(s: &str, width: usize) -> Vec<String> {
             break;
         }
         // Take up to width characters
-        let split_at = remaining.char_indices()
+        let split_at = remaining
+            .char_indices()
             .take(width)
             .last()
             .map(|(i, c)| i + c.len_utf8())
@@ -130,6 +133,19 @@ fn wrap_line(s: &str, width: usize) -> Vec<String> {
         remaining = &remaining[split_at..];
     }
     lines
+}
+#[derive(PartialEq)]
+enum LineType {
+    Prompt,
+    Result,
+    Error,
+    Indicator,
+    Normal,
+}
+
+struct Line {
+    content: String,
+    line_type: LineType,
 }
 
 fn main() {
@@ -141,16 +157,16 @@ fn main() {
     start_color();
     use_default_colors();
     // History area colors (dark grey background)
-    init_pair(1, COLOR_GREEN, 236);   // result
-    init_pair(2, COLOR_RED, 236);     // error
-    init_pair(3, COLOR_CYAN, -1);     // prompt (input row, default bg)
-    init_pair(4, COLOR_WHITE, 236);   // normal history text
-    init_pair(5, COLOR_CYAN, 236);    // prompt in history
-    init_pair(6, COLOR_WHITE, 236);   // separator line
+    init_pair(1, COLOR_GREEN, 236); // result
+    init_pair(2, COLOR_RED, 236); // error
+    init_pair(3, COLOR_CYAN, -1); // prompt (input row, default bg)
+    init_pair(4, COLOR_WHITE, 236); // normal history text
+    init_pair(5, COLOR_CYAN, 236); // prompt in history
+    init_pair(6, COLOR_WHITE, 236); // separator line
 
     let mut input = String::new();
     let mut cursor: usize = 0;
-    let mut history: Vec<String> = Vec::new();
+    let mut history: Vec<Line> = Vec::new();
     let mut scroll_offset: usize = 0;
     let mut input_history: Vec<String> = Vec::new();
     let mut hist_idx: usize = 0;
@@ -192,24 +208,20 @@ fn main() {
             let idx = scroll_offset + row;
             let (line_content, color_pair, line_len) = if idx < history.len() {
                 let line = &history[idx];
-                if line.starts_with("Error:") {
-                    (line.as_str(), 2, line.chars().count())
-                } else if line.starts_with(">> ") {
-                    // Prompt lines handled specially below
-                    ("", 0, 0)
-                } else if line.starts_with("   ") && line.chars().skip(3).all(|c| c == '_' || c == '^' || c == '-') {
-                    // Error indicator line - use red color
-                    (line.as_str(), 2, line.chars().count())
-                } else {
-                    (line.as_str(), 1, line.chars().count())
+                match line.line_type {
+                    LineType::Result => (line.content.as_str(), 1, line.content.chars().count()),
+                    LineType::Error => (line.content.as_str(), 2, line.content.chars().count()),
+                    LineType::Indicator => (line.content.as_str(), 2, line.content.chars().count()),
+                    LineType::Prompt => ("", 0, 0), // handled specially below
+                    LineType::Normal => (line.content.as_str(), 4, line.content.chars().count()),
                 }
             } else {
                 ("", 4, 0)
             };
 
-            if idx < history.len() && history[idx].starts_with(">> ") {
+            if idx < history.len() && history[idx].line_type == LineType::Prompt {
                 // Prompt line: ">> " in cyan, rest in white, all on grey background
-                let line = &history[idx];
+                let line = &history[idx].content;
                 attron(COLOR_PAIR(5));
                 addstr(">> ");
                 attroff(COLOR_PAIR(5));
@@ -344,12 +356,18 @@ fn main() {
                             // Wrap input line (account for ">> " prefix)
                             let input_line = format!(">> {}", input);
                             for line in wrap_line(&input_line, inner_w) {
-                                history.push(line);
+                                history.push(Line {
+                                    content: line,
+                                    line_type: LineType::Prompt,
+                                });
                             }
                             // Wrap result output
                             let result_str = format!("{}", &res);
                             for line in wrap_line(&result_str, inner_w) {
-                                history.push(line);
+                                history.push(Line {
+                                    content: line,
+                                    line_type: LineType::Result,
+                                });
                             }
                             match assignment {
                                 Some(Assignment::Single(name)) => {
@@ -363,8 +381,12 @@ fn main() {
                                             }
                                         }
                                         Err(e) => {
-                                            for line in wrap_line(&format!("Error: {}", e), inner_w) {
-                                                history.push(line);
+                                            for line in wrap_line(&format!("Error: {}", e), inner_w)
+                                            {
+                                                history.push(Line {
+                                                    content: line,
+                                                    line_type: LineType::Error,
+                                                });
                                             }
                                         }
                                     }
@@ -375,7 +397,10 @@ fn main() {
                         Err(e) => {
                             let input_line = format!(">> {}", input);
                             for line in wrap_line(&input_line, inner_w) {
-                                history.push(line);
+                                history.push(Line {
+                                    content: line,
+                                    line_type: LineType::Prompt,
+                                });
                             }
                             // Add indicator line if we have span info
                             if let Some(span) = e.span {
@@ -387,14 +412,26 @@ fn main() {
                                 } else {
                                     trim_offset
                                 };
-                                let adjusted_span = Span::new(span.start + expr_offset, span.end + expr_offset);
-                                let indicator = format!("   {}", format_error_indicator(&input, adjusted_span));
+                                let adjusted_span =
+                                    Span::new(span.start + expr_offset, span.end + expr_offset);
+                                let indicator =
+                                    format!("   {}", format_error_indicator(&input, adjusted_span));
                                 for line in wrap_line(&indicator, inner_w) {
-                                    history.push(line);
+                                    history.push(Line {
+                                        content: line,
+                                        line_type: LineType::Indicator,
+                                    });
                                 }
                             }
-                            for line in wrap_line(&format!("Error: {}", e.message), inner_w) {
-                                history.push(line);
+                            let error_message = format!("Error: {}", e.message);
+                            let error_lines = error_message.split('\n');
+                            for error_line in error_lines {
+                                for line in wrap_line(&error_line, inner_w) {
+                                    history.push(Line {
+                                        content: line,
+                                        line_type: LineType::Error,
+                                    });
+                                }
                             }
                         }
                     }
@@ -498,9 +535,15 @@ mod tests {
         assert!(approx(scalar(&eval("sin(0)").unwrap()), 0.0));
         assert!(approx(scalar(&eval("cos(0)").unwrap()), 1.0));
         assert!(approx(scalar(&eval("tan(0)").unwrap()), 0.0));
-        assert!(approx(scalar(&eval("asin(1)").unwrap()), std::f64::consts::FRAC_PI_2));
+        assert!(approx(
+            scalar(&eval("asin(1)").unwrap()),
+            std::f64::consts::FRAC_PI_2
+        ));
         assert!(approx(scalar(&eval("acos(1)").unwrap()), 0.0));
-        assert!(approx(scalar(&eval("atan(1)").unwrap()), std::f64::consts::FRAC_PI_4));
+        assert!(approx(
+            scalar(&eval("atan(1)").unwrap()),
+            std::f64::consts::FRAC_PI_4
+        ));
     }
 
     #[test]
@@ -530,8 +573,14 @@ mod tests {
         let mut vars = HashMap::new();
         vars.insert("x".to_string(), Value::Scalar(10.0));
         vars.insert("y".to_string(), Value::Scalar(3.0));
-        assert!(approx(scalar(&evaluate_expression("x+y", &vars).unwrap()), 13.0));
-        assert!(approx(scalar(&evaluate_expression("x*y", &vars).unwrap()), 30.0));
+        assert!(approx(
+            scalar(&evaluate_expression("x+y", &vars).unwrap()),
+            13.0
+        ));
+        assert!(approx(
+            scalar(&evaluate_expression("x*y", &vars).unwrap()),
+            30.0
+        ));
     }
 
     #[test]
@@ -656,7 +705,10 @@ mod tests {
         let mut vars = HashMap::new();
         let lam = eval("|x|(x*x)").unwrap();
         vars.insert("sq".to_string(), lam);
-        assert!(approx(scalar(&evaluate_expression("sq(3)", &vars).unwrap()), 9.0));
+        assert!(approx(
+            scalar(&evaluate_expression("sq(3)", &vars).unwrap()),
+            9.0
+        ));
     }
 
     #[test]
@@ -673,7 +725,10 @@ mod tests {
         let mut vars = HashMap::new();
         let lam = evaluate_expression("|x|(x+1)", &vars).unwrap();
         vars.insert("inc".to_string(), lam);
-        assert!(approx(scalar(&evaluate_expression("inc(5)", &vars).unwrap()), 6.0));
+        assert!(approx(
+            scalar(&evaluate_expression("inc(5)", &vars).unwrap()),
+            6.0
+        ));
     }
 
     #[test]
@@ -931,7 +986,10 @@ mod tests {
     #[test]
     fn array_filter_lambda_two_params() {
         let mut vars = HashMap::new();
-        vars.insert("arr".to_string(), Value::Array(vec![1.0, 2.0, 3.0, 4.0, 5.0]));
+        vars.insert(
+            "arr".to_string(),
+            Value::Array(vec![1.0, 2.0, 3.0, 4.0, 5.0]),
+        );
         // Filter elements > 2: arr[pred] where pred = |i,x|(x > 2)
         let lam = eval("|i,x|(x > 2)").unwrap();
         vars.insert("pred".to_string(), lam);
@@ -942,7 +1000,10 @@ mod tests {
     #[test]
     fn array_filter_even_indices() {
         let mut vars = HashMap::new();
-        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
+        vars.insert(
+            "arr".to_string(),
+            Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]),
+        );
         // Filter even indices: i % 2 == 0
         // We can use floor(i/2)*2 == i to check evenness
         let lam = eval("|i,x|(floor(i/2)*2 == i)").unwrap();
@@ -954,7 +1015,10 @@ mod tests {
     #[test]
     fn array_filter_positive() {
         let mut vars = HashMap::new();
-        vars.insert("arr".to_string(), Value::Array(vec![-2.0, -1.0, 0.0, 1.0, 2.0]));
+        vars.insert(
+            "arr".to_string(),
+            Value::Array(vec![-2.0, -1.0, 0.0, 1.0, 2.0]),
+        );
         let lam = eval("|i,x|(x > 0)").unwrap();
         vars.insert("pos".to_string(), lam);
         let result = eval_with("arr[pos]", &vars).unwrap();
@@ -994,7 +1058,10 @@ mod tests {
     #[test]
     fn tuple_array_index() {
         let mut vars = HashMap::new();
-        let ta = Value::TupleArray { width: 2, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
+        let ta = Value::TupleArray {
+            width: 2,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        };
         vars.insert("ta".to_string(), ta);
         // ta[0] should give (1, 2)
         let result = eval_with("ta[0]", &vars).unwrap();
@@ -1008,7 +1075,10 @@ mod tests {
     fn tuple_array_filter() {
         let mut vars = HashMap::new();
         // {(1,10), (2,20), (3,30)} filter where first element > 1
-        let ta = Value::TupleArray { width: 2, data: vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0] };
+        let ta = Value::TupleArray {
+            width: 2,
+            data: vec![1.0, 10.0, 2.0, 20.0, 3.0, 30.0],
+        };
         vars.insert("ta".to_string(), ta);
         // Filter: keep tuples where x > 1 (x is the first element of the tuple)
         let lam = eval("|i,x,y|(x > 1)").unwrap();
@@ -1023,7 +1093,10 @@ mod tests {
     fn chained_indexing() {
         // Test chained indexing: create array, then filter, then index
         let mut vars = HashMap::new();
-        vars.insert("arr".to_string(), Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]));
+        vars.insert(
+            "arr".to_string(),
+            Value::Array(vec![10.0, 20.0, 30.0, 40.0, 50.0]),
+        );
         let lam = eval("|i,x|(x > 20)").unwrap();
         vars.insert("gt20".to_string(), lam);
         // arr[gt20][0] should give 30
@@ -1047,8 +1120,14 @@ mod tests {
 
     #[test]
     fn parse_tuple_pattern_valid() {
-        assert_eq!(parse_tuple_pattern("(a, b)"), Some(vec!["a".to_string(), "b".to_string()]));
-        assert_eq!(parse_tuple_pattern("(x, y, z)"), Some(vec!["x".to_string(), "y".to_string(), "z".to_string()]));
+        assert_eq!(
+            parse_tuple_pattern("(a, b)"),
+            Some(vec!["a".to_string(), "b".to_string()])
+        );
+        assert_eq!(
+            parse_tuple_pattern("(x, y, z)"),
+            Some(vec!["x".to_string(), "y".to_string(), "z".to_string()])
+        );
     }
 
     #[test]
@@ -1095,7 +1174,10 @@ mod tests {
         // TupleArray of width 3, filter with |i, rest|(...)
         // rest should be the tuple (a, b, c)
         let mut vars = HashMap::new();
-        let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
+        let ta = Value::TupleArray {
+            width: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
         vars.insert("ta".to_string(), ta);
         // Filter where index == 0
         let lam = eval("|i, rest|(i == 0)").unwrap();
@@ -1122,7 +1204,10 @@ mod tests {
         // Map over TupleArray with decomposition
         // {(1,2,3), (4,5,6)} with |a, rest|(a) should give {1, 4}
         let mut vars = HashMap::new();
-        let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0] };
+        let ta = Value::TupleArray {
+            width: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        };
         vars.insert("ta".to_string(), ta);
         let lam = eval("|a, rest|(a)").unwrap();
         vars.insert("first_elem".to_string(), lam);
@@ -1134,7 +1219,10 @@ mod tests {
     fn filter_three_dim_tuple_array_by_index() {
         // This is the user's example: x[|i,y|(i==0)] on 3D tuple array
         let mut vars = HashMap::new();
-        let ta = Value::TupleArray { width: 3, data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0] };
+        let ta = Value::TupleArray {
+            width: 3,
+            data: vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
         vars.insert("x".to_string(), ta);
         let lam = eval("|i, y|(i == 0)").unwrap();
         vars.insert("f".to_string(), lam);
@@ -1177,7 +1265,12 @@ mod tests {
         let v = eval("{1, 2} ** {10, 20, 30}").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
-        assert!(approx_arr(&d, &[1.0, 10.0, 1.0, 20.0, 1.0, 30.0, 2.0, 10.0, 2.0, 20.0, 2.0, 30.0]));
+        assert!(approx_arr(
+            &d,
+            &[
+                1.0, 10.0, 1.0, 20.0, 1.0, 30.0, 2.0, 10.0, 2.0, 20.0, 2.0, 30.0
+            ]
+        ));
     }
 
     #[test]
@@ -1218,7 +1311,12 @@ mod tests {
         let v = eval("{(1, 2), (3, 4)} ** {10, 20}").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 3);
-        assert!(approx_arr(&d, &[1.0, 2.0, 10.0, 1.0, 2.0, 20.0, 3.0, 4.0, 10.0, 3.0, 4.0, 20.0]));
+        assert!(approx_arr(
+            &d,
+            &[
+                1.0, 2.0, 10.0, 1.0, 2.0, 20.0, 3.0, 4.0, 10.0, 3.0, 4.0, 20.0
+            ]
+        ));
     }
 
     #[test]
@@ -1227,7 +1325,10 @@ mod tests {
         let v = eval("[2] ** [3]").unwrap();
         let (w, d) = tuple_array(&v);
         assert_eq!(w, 2);
-        assert!(approx_arr(&d, &[0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.0, 0.0, 1.0, 1.0, 1.0, 2.0]));
+        assert!(approx_arr(
+            &d,
+            &[0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 1.0, 0.0, 1.0, 1.0, 1.0, 2.0]
+        ));
     }
 
     #[test]
@@ -1443,9 +1544,18 @@ mod tests {
         let mut vars = HashMap::new();
         let lam = eval("|x|(x > 0 && x < 10)").unwrap();
         vars.insert("inrange".to_string(), lam);
-        assert!(approx(scalar(&eval_with("inrange(5)", &vars).unwrap()), 1.0));
-        assert!(approx(scalar(&eval_with("inrange(-1)", &vars).unwrap()), 0.0));
-        assert!(approx(scalar(&eval_with("inrange(15)", &vars).unwrap()), 0.0));
+        assert!(approx(
+            scalar(&eval_with("inrange(5)", &vars).unwrap()),
+            1.0
+        ));
+        assert!(approx(
+            scalar(&eval_with("inrange(-1)", &vars).unwrap()),
+            0.0
+        ));
+        assert!(approx(
+            scalar(&eval_with("inrange(15)", &vars).unwrap()),
+            0.0
+        ));
     }
 
     #[test]

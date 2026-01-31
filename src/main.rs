@@ -863,14 +863,14 @@ mod tests {
 
     #[test]
     fn lambda_single_display() {
-        let v = eval("|x|(x+1)").unwrap();
-        assert_eq!(format!("{}", v), "|x|((x + 1))");
+        let v = eval("|x|x+1").unwrap();
+        assert_eq!(format!("{}", v), "|x|(x + 1)");
     }
 
     #[test]
     fn lambda_multi_display() {
-        let v = eval("|a,b|(a+b)").unwrap();
-        assert_eq!(format!("{}", v), "|a, b|((a + b))");
+        let v = eval("|a,b|a+b").unwrap();
+        assert_eq!(format!("{}", v), "|a, b|(a + b)");
     }
 
     #[test]
@@ -1759,26 +1759,47 @@ mod tests {
 
     #[test]
     fn lambda_not_in_arithmetic() {
-        // -|x|(x) should not parse - lambda can't be operand of unary minus
-        assert!(eval("-|x|(x)").is_err());
-    }
-
-    #[test]
-    fn lambda_not_addable() {
-        // |x|(x) + 1 should not parse - lambda can't be in arithmetic
-        assert!(eval("|x|(x) + 1").is_err());
+        // -|x|x should not parse - lambda can't be operand of unary minus
+        assert!(eval("-|x|x").is_err());
     }
 
     #[test]
     fn lambda_not_multipliable() {
-        // 2 * |x|(x) should not parse
-        assert!(eval("2 * |x|(x)").is_err());
+        // 2 * |x|x should not parse - lambda can't be RHS of multiplication
+        assert!(eval("2 * |x|x").is_err());
+    }
+
+    #[test]
+    fn lambda_no_parens() {
+        // Lambda without parens around body should work
+        let mut vars = HashMap::new();
+        let lam = eval("|x|x*x").unwrap();
+        vars.insert("sq".to_string(), lam);
+        assert!(approx(scalar(&eval_with("sq(3)", &vars).unwrap()), 9.0));
+    }
+
+    #[test]
+    fn lambda_no_parens_multi_param() {
+        // Multi-param lambda without parens
+        let mut vars = HashMap::new();
+        let lam = eval("|x,y|x+y").unwrap();
+        vars.insert("add".to_string(), lam);
+        assert!(approx(scalar(&eval_with("add((2, 3))", &vars).unwrap()), 5.0));
+    }
+
+    #[test]
+    fn lambda_body_greedy() {
+        // Lambda body should consume entire expression
+        let mut vars = HashMap::new();
+        let lam = eval("|x|x + 1").unwrap();
+        vars.insert("inc".to_string(), lam);
+        assert!(approx(scalar(&eval_with("inc(5)", &vars).unwrap()), 6.0));
     }
 
     #[test]
     fn lambda_standalone_ok() {
         // Lambda at top level should work (for assignment)
-        let v = eval("|x|(x*x)").unwrap();
+        let v = eval("|x|x*x").unwrap();
         match v {
             Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
             _ => panic!("expected lambda"),
@@ -1788,7 +1809,7 @@ mod tests {
     #[test]
     fn lambda_in_parens_ok() {
         // Lambda wrapped in parens should work
-        let v = eval("(|x|(x+1))").unwrap();
+        let v = eval("(|x|x+1)").unwrap();
         match v {
             Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
             _ => panic!("expected lambda"),
@@ -1797,25 +1818,45 @@ mod tests {
 
     #[test]
     fn lambda_in_filter_ok() {
-        // Lambda in array filter should work
-        let v = eval("{1,2,3,4,5}[|i,x|(x > 2)]").unwrap();
+        // Lambda in array filter should work (no parens needed)
+        let v = eval("{1,2,3,4,5}[|i,x|x > 2]").unwrap();
         assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
     }
 
     #[test]
     fn lambda_in_fold_ok() {
-        // Lambda in fold should work
-        let v = eval("{1,2,3} @ 0 {|a,b|(a+b)}").unwrap();
+        // Lambda in fold should work (no parens needed)
+        let v = eval("{1,2,3} @ 0 {|a,b|a+b}").unwrap();
         assert!(approx(scalar(&v), 6.0));
     }
 
     #[test]
     fn nested_lambda_ok() {
-        // Nested lambda (currying) should work
-        let v = eval("|x|(|y|(x+y))").unwrap();
+        // Nested lambda (currying) - needs space or parens to avoid || being parsed as OR
+        let v = eval("|x| |y|x+y").unwrap();
         match v {
             Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
             _ => panic!("expected lambda"),
         }
+    }
+
+    #[test]
+    fn nested_lambda_with_parens() {
+        // Nested lambda with explicit parens also works
+        let v = eval("|x|(|y|x+y)").unwrap();
+        match v {
+            Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
+            _ => panic!("expected lambda"),
+        }
+    }
+
+    #[test]
+    fn lambda_with_boolean_body() {
+        // Lambda body can include boolean operators
+        let mut vars = HashMap::new();
+        let lam = eval("|x|x > 0 && x < 10").unwrap();
+        vars.insert("inrange".to_string(), lam);
+        assert!(approx(scalar(&eval_with("inrange(5)", &vars).unwrap()), 1.0));
+        assert!(approx(scalar(&eval_with("inrange(15)", &vars).unwrap()), 0.0));
     }
 }

@@ -10,14 +10,15 @@ pub Expr: SpannedExpr = {
 };
 
 // Lambda definitions - NOT part of the normal expression hierarchy
-// This prevents things like -|x|(x) or |x|(x) + 1
+// This prevents things like -|x|x or |x|x + 1
+// Body extends to end of expression (greedy) - no parens required
 LambdaExpr: SpannedExpr = {
-    // Single param: |x|(body)
-    <l:@L> "|" <p:Ident> "|" "(" <body:Expr> ")" <r:@R> => {
+    // Single param: |x|body
+    <l:@L> "|" <p:Ident> "|" <body:Expr> <r:@R> => {
         Spanned::new(Expr::Lambda { params: vec![p.to_string()], body: Box::new(body) }, Span::new(l, r))
     },
-    // Multi param: |x,y|(body)
-    <l:@L> "|" <first:Ident> "," <rest:Comma<Ident>> "|" "(" <body:Expr> ")" <r:@R> => {
+    // Multi param: |x,y|body
+    <l:@L> "|" <first:Ident> "," <rest:Comma<Ident>> "|" <body:Expr> <r:@R> => {
         let mut params = vec![first.to_string()];
         params.extend(rest.iter().map(|s| s.to_string()));
         Spanned::new(Expr::Lambda { params, body: Box::new(body) }, Span::new(l, r))

@@ -23,7 +23,7 @@ fn evaluate_expression(input: &str, vars: &HashMap<String, Value>) -> Result<Val
     }
 
     // Parse to AST
-    let ast = expr::TopExprParser::new().parse(input).map_err(|e| {
+    let ast = expr::ExprParser::new().parse(input).map_err(|e| {
         // Extract span from parse error if possible
         match &e {
             lalrpop_util::ParseError::InvalidToken { location } => {
@@ -1753,5 +1753,69 @@ mod tests {
         // Fold on single element: init combined with that element
         let v = eval("{5} @ 10 {|a,b|(a+b)}").unwrap();
         assert!(approx(scalar(&v), 15.0));
+    }
+
+    // Lambda grammar tests - lambdas should only appear in specific places
+
+    #[test]
+    fn lambda_not_in_arithmetic() {
+        // -|x|(x) should not parse - lambda can't be operand of unary minus
+        assert!(eval("-|x|(x)").is_err());
+    }
+
+    #[test]
+    fn lambda_not_addable() {
+        // |x|(x) + 1 should not parse - lambda can't be in arithmetic
+        assert!(eval("|x|(x) + 1").is_err());
+    }
+
+    #[test]
+    fn lambda_not_multipliable() {
+        // 2 * |x|(x) should not parse
+        assert!(eval("2 * |x|(x)").is_err());
+    }
+
+    #[test]
+    fn lambda_standalone_ok() {
+        // Lambda at top level should work (for assignment)
+        let v = eval("|x|(x*x)").unwrap();
+        match v {
+            Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
+            _ => panic!("expected lambda"),
+        }
+    }
+
+    #[test]
+    fn lambda_in_parens_ok() {
+        // Lambda wrapped in parens should work
+        let v = eval("(|x|(x+1))").unwrap();
+        match v {
+            Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
+            _ => panic!("expected lambda"),
+        }
+    }
+
+    #[test]
+    fn lambda_in_filter_ok() {
+        // Lambda in array filter should work
+        let v = eval("{1,2,3,4,5}[|i,x|(x > 2)]").unwrap();
+        assert!(approx_arr(&array(&v), &[3.0, 4.0, 5.0]));
+    }
+
+    #[test]
+    fn lambda_in_fold_ok() {
+        // Lambda in fold should work
+        let v = eval("{1,2,3} @ 0 {|a,b|(a+b)}").unwrap();
+        assert!(approx(scalar(&v), 6.0));
+    }
+
+    #[test]
+    fn nested_lambda_ok() {
+        // Nested lambda (currying) should work
+        let v = eval("|x|(|y|(x+y))").unwrap();
+        match v {
+            Value::Lambda { params, .. } => assert_eq!(params, vec!["x"]),
+            _ => panic!("expected lambda"),
+        }
     }
 }

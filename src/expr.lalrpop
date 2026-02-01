@@ -3,7 +3,9 @@ use crate::ast::{Expr, BinOp, UnaryOp, Span, Spanned, SpannedExpr};
 grammar;
 
 // Top-level entry point: allows lambda or regular expression
-// Lambda can only appear at top level, in parens, in index [], in fold {}, or as tuple/array element
+// Lambda allowed: top level, grouping parens, index brackets
+// Lambda required: fold braces
+// Lambda forbidden: function args, tuple elements, array elements
 pub Expr: SpannedExpr = {
     LambdaExpr,
     TopExpr,
@@ -106,12 +108,12 @@ Unary: SpannedExpr = {
 };
 
 Postfix: SpannedExpr = {
-    // Index: arr[idx] - idx can be lambda for filtering
+    // Index: arr[idx] - idx can be number OR lambda for filtering
     <l:@L> <base:Postfix> "[" <idx:Expr> "]" <r:@R> => {
         Spanned::new(Expr::Index(Box::new(base), Box::new(idx)), Span::new(l, r))
     },
-    // Fold: array @ init { lambda }
-    <l:@L> <arr:Postfix> "@" <init:Unary> r"\{" <lam:Expr> r"\}" <r:@R> => {
+    // Fold: array @ init { lambda } - ONLY lambda allowed in braces
+    <l:@L> <arr:Postfix> "@" <init:Unary> r"\{" <lam:LambdaExpr> r"\}" <r:@R> => {
         Spanned::new(Expr::Fold { array: Box::new(arr), init: Box::new(init), lambda: Box::new(lam) }, Span::new(l, r))
     },
     Atom,
@@ -133,24 +135,24 @@ CommaSep<T>: Vec<T> = {
 
 Atom: SpannedExpr = {
     Num,
-    // Tuple literal: (a, b) or (a, b, c, ...) - elements can be lambdas
-    <l:@L> "(" <first:Expr> "," <rest:Comma<Expr>> ")" <r:@R> => {
+    // Tuple literal: (a, b) or (a, b, c, ...) - no lambdas in tuples
+    <l:@L> "(" <first:TopExpr> "," <rest:Comma<TopExpr>> ")" <r:@R> => {
         let mut elems = vec![first];
         elems.extend(rest);
         Spanned::new(Expr::Tuple(elems), Span::new(l, r))
     },
-    // Grouping parentheses - can contain lambda
+    // Grouping parentheses - can contain lambda (for assignment like sq = (|x|x*x))
     "(" <e:Expr> ")" => e,
     // Range: [n] creates array 0..n
     <l:@L> "[" <e:TopExpr> "]" <r:@R> => {
         Spanned::new(Expr::Range(Box::new(e)), Span::new(l, r))
     },
-    // Array literal: {1, 2, 3} - elements can be lambdas
-    <l:@L> r"\{" <elems:Comma<Expr>> r"\}" <r:@R> => {
+    // Array literal: {1, 2, 3} - no lambdas in arrays
+    <l:@L> r"\{" <elems:Comma<TopExpr>> r"\}" <r:@R> => {
         Spanned::new(Expr::Array(elems), Span::new(l, r))
     },
-    // Builtin function call or user function call - argument can be lambda
-    <l:@L> <name:Ident> "(" <arg:Expr> ")" <r:@R> => {
+    // Builtin function call or user function call - no lambda as argument
+    <l:@L> <name:Ident> "(" <arg:TopExpr> ")" <r:@R> => {
         let builtins = ["sin", "cos", "tan", "asin", "acos", "atan",
                         "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
                         "sqrt", "abs", "ln", "log2", "log10", "exp",

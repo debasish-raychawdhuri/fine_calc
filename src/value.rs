@@ -56,7 +56,7 @@ impl fmt::Display for Value {
                 write!(f, "}}")
             }
             Value::Lambda { params, body } => {
-                write!(f, "|{}|{}", params.join(", "), body)
+                write!(f, "|{}| {}", params.join(", "), body)
             }
         }
     }

@@ -148,6 +148,41 @@ struct Line {
     line_type: LineType,
 }
 
+const BUILTIN_NAMES: &[&str] = &[
+    "pi", "e",
+    "sin", "cos", "tan", "asin", "acos", "atan",
+    "sinh", "cosh", "tanh", "asinh", "acosh", "atanh",
+    "sqrt", "abs", "ln", "log2", "log10", "exp",
+    "floor", "ceil", "round",
+];
+
+/// Extract the identifier prefix ending at `cursor` in `input`.
+/// Returns (start_position, prefix_str).
+fn word_prefix_at(input: &str, cursor: usize) -> (usize, &str) {
+    let before = &input[..cursor];
+    let start = before
+        .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    (start, &input[start..cursor])
+}
+
+/// Collect all completable names: user variables + builtins.
+fn completions_for(prefix: &str, variables: &HashMap<String, Value>) -> Vec<String> {
+    let mut matches: Vec<String> = variables
+        .keys()
+        .filter(|k| k.starts_with(prefix))
+        .cloned()
+        .collect();
+    for &name in BUILTIN_NAMES {
+        if name.starts_with(prefix) && !matches.contains(&name.to_string()) {
+            matches.push(name.to_string());
+        }
+    }
+    matches.sort();
+    matches
+}
+
 fn main() {
     initscr();
     cbreak();
@@ -163,6 +198,8 @@ fn main() {
     init_pair(4, COLOR_WHITE, 236); // normal history text
     init_pair(5, COLOR_CYAN, 236); // prompt in history
     init_pair(6, COLOR_WHITE, 236); // separator line
+    init_pair(7, COLOR_BLACK, COLOR_CYAN); // completion: selected item
+    init_pair(8, COLOR_WHITE, 238); // completion: normal item
 
     let mut input = String::new();
     let mut cursor: usize = 0;
@@ -172,6 +209,12 @@ fn main() {
     let mut hist_idx: usize = 0;
     let mut saved_input = String::new();
     let mut variables: HashMap<String, Value> = HashMap::new();
+
+    // Tab completion state
+    let mut completing = false;
+    let mut completions: Vec<String> = Vec::new();
+    let mut comp_idx: usize = 0;
+    let mut comp_prefix_start: usize = 0;
 
     loop {
         let max_y = getmaxy(stdscr()) as usize;
@@ -281,12 +324,105 @@ fn main() {
         }
         addch(ACS_LRCORNER());
 
+        // Draw completion menu if active
+        if completing && !completions.is_empty() {
+            let menu_max = std::cmp::min(completions.len(), visible_rows);
+            // Scroll the completion list so comp_idx is always visible
+            let comp_scroll = if comp_idx >= menu_max {
+                comp_idx - menu_max + 1
+            } else {
+                0
+            };
+            // Position menu just above the separator, growing upward
+            for i in 0..menu_max {
+                let ci = comp_scroll + i;
+                let y = sep_y - (menu_max - i) as i32;
+                if y < 1 {
+                    continue;
+                }
+                let label = &completions[ci];
+                let col = (4 + comp_prefix_start) as i32;
+                mv(y, col);
+                let pair = if ci == comp_idx { 7 } else { 8 };
+                attron(COLOR_PAIR(pair));
+                addstr(&format!(" {} ", label));
+                // Pad to make items equal width
+                let max_len = completions.iter().map(|s| s.len()).max().unwrap_or(0);
+                for _ in label.len()..max_len {
+                    addch(' ' as u32);
+                }
+                addstr(" ");
+                attroff(COLOR_PAIR(pair));
+            }
+        }
+
         // Place cursor at correct position
         mv(input_y, (4 + cursor) as i32);
         refresh();
 
         let ch = getch();
+
+        // Handle completion mode keys
+        if completing {
+            match ch {
+                KEY_UP => {
+                    if comp_idx > 0 {
+                        comp_idx -= 1;
+                    }
+                    continue;
+                }
+                KEY_DOWN => {
+                    if comp_idx + 1 < completions.len() {
+                        comp_idx += 1;
+                    }
+                    continue;
+                }
+                KEY_ENTER | 10 | 9 => {
+                    // Accept selected completion (Enter or Tab)
+                    let chosen = completions[comp_idx].clone();
+                    let prefix_len = cursor - comp_prefix_start;
+                    let suffix = &chosen[prefix_len..];
+                    input.insert_str(cursor, suffix);
+                    cursor += suffix.len();
+                    completing = false;
+                    completions.clear();
+                    continue;
+                }
+                27 => {
+                    // Escape: cancel completion
+                    completing = false;
+                    completions.clear();
+                    continue;
+                }
+                _ => {
+                    // Any other key: cancel completion and process normally
+                    completing = false;
+                    completions.clear();
+                }
+            }
+        }
+
         match ch {
+            9 => {
+                // Tab: trigger completion
+                let (start, prefix) = word_prefix_at(&input, cursor);
+                if !prefix.is_empty() {
+                    let matches = completions_for(prefix, &variables);
+                    if matches.len() == 1 {
+                        // Single match: complete immediately
+                        let chosen = &matches[0];
+                        let suffix = &chosen[prefix.len()..];
+                        input.insert_str(cursor, suffix);
+                        cursor += suffix.len();
+                    } else if matches.len() > 1 {
+                        // Multiple matches: enter completion mode
+                        completing = true;
+                        completions = matches;
+                        comp_idx = 0;
+                        comp_prefix_start = start;
+                    }
+                }
+            }
             KEY_LEFT => {
                 if cursor > 0 {
                     cursor -= 1;
